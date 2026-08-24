@@ -81,8 +81,11 @@ def main():
               "keyB used" in d.rationale)
         check("keyC was never used", "keyC" not in d.rationale)
 
-        # keyA was paused in a cooldown (not killed for the day)
-        check("keyA now in cooldown", "keyA" in s3._exhausted_keys())
+        # keyA was paused in a cooldown (not killed for the day). State stores
+        # only a hash, never the raw API key.
+        check("keyA now in cooldown", s3._key_id("keyA") in s3._exhausted_keys())
+        state_text = s3._key_state_path().read_text(encoding="utf-8")
+        check("cooldown state does not store raw key", "keyA" not in state_text)
 
         # ---- scenario 2: old state file (all keys blocked all day) is ignored -
         today = datetime.now(timezone.utc).date().isoformat()

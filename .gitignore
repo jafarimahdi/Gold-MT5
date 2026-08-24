@@ -1,1 +1,30 @@
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+
+# Runtime logs
+**/logs/*.log
+
+# Generated runtime data
+**/data/*.json
+**/data/*.csv
+**/data/*.lock
+**/data/*.txt
+**/data/*.html
+
+# Keep empty-folder placeholders
+!**/data/.gitkeep
+!**/logs/.gitkeep
+
+# Operating-system files
+.DS_Store
+Thumbs.db

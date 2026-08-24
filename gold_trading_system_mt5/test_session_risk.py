@@ -50,10 +50,17 @@ def test_no_data_does_not_crash():
     check("empty feed -> snapshot built", snap is not None)
     check("empty feed -> NEUTRAL signal", snap.signal_direction == "NEUTRAL")
     check("empty feed -> zero confidence", snap.confidence == 0.0)
-    # decision + execution on empty snapshot must not crash either
+    # Direct executor calls must be safe even if the user's .env enables
+    # trading. Force the master switch OFF so this test can never send a real
+    # order to a connected MT5 terminal.
     d = Decision("BUY", 95.0, "would-be")
-    r = MT5Executor().execute(d, snap)
-    check("execution on empty snapshot safe", r.status in ("SKIPPED", "PENDING"))
+    old_enabled = config.TRADING_ENABLED
+    config.TRADING_ENABLED = False
+    try:
+        r = MT5Executor().execute(d, snap)
+    finally:
+        config.TRADING_ENABLED = old_enabled
+    check("execution on empty snapshot safe", r.status == "SKIPPED")
 
     # half-empty: candles only (weekend feed that still returns history)
     import numpy as np

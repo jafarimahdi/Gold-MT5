@@ -387,6 +387,48 @@ Interpretation:
 - The owner must keep `TRADING_ENABLED=0` while installing/testing Gemini and before the execution path is clarified.
 - The log showed the same closed trade outcomes being written repeatedly in one loop iteration. `check_closed_deals()` returns all of today's closed deals, while `main.py` appends them again every cycle. This is a reporting bug that should be fixed by deduplicating logged deal IDs before trusting trade statistics.
 
+### Windows safety-test finding — 2026-08-24
+
+When the owner ran `test_session_risk.py` with the real MetaTrader5 package and terminal available, the suite returned `24/25`. The no-data execution test called `MT5Executor.execute()` directly with a high-confidence BUY and an empty snapshot. Because `TRADING_ENABLED=0` is currently enforced in `main.py`'s safety-gate path rather than inside `MT5Executor.execute()`, the direct test attempted `mt5.order_send()` and MT5 rejected it with retcode `10018` (market closed).
+
+No order was reported as executed, but this exposed a serious safety gap: a direct executor call can bypass the master switch, and an empty snapshot could reach the order path when the market is open. Before further live/demo execution tests, add a master-switch check and empty/invalid-snapshot validation inside `MT5Executor.execute()`, make the no-data test use a mock or guaranteed non-trading executor, and add tests proving no order is sent when trading is disabled.
+
+### End-to-end test hygiene finding — 2026-08-24
+
+The first Windows run of `e2e_test.py` returned `31/31`, but its log displayed a masked key that matched a real key from the user's `.env`. The mocked Gemini module prevented a real API call, but the test failed to override the derived `config.GEMINI_API_KEYS` list, so it could still read a real secret. The test should set `config.GEMINI_API_KEYS = ["test-key"]` and the fake MT5 module should provide `history_deals_get = lambda ...: []`. An incremental patch named `e2e-test-secret-safe.patch` was prepared. Do not treat the e2e test as clean until this patch is applied and rerun.
+
+### Task 1 — execution mode routing prepared — 2026-08-25
+
+The owner selected EA-only execution. The local `.env` currently contains:
+
+```env
+EXECUTION_MODE=ea
+TRADING_ENABLED=0
+```
+
+The execution-mode update was implemented and tested in the development workspace but still needs to be applied/committed to the owner's GitHub working copy. The update adds `EXECUTION_MODE=none|python|ea` handling:
+
+- `none`: analysis only and neutralise the EA signal;
+- `python`: Python MT5 execution only and neutralise the EA signal;
+- `ea`: defer Step 4 to the EA and allow the bridge to carry an actionable signal only when all safety gates pass.
+
+The patched workspace tests passed: `test_session_risk.py` 25/25, `test_markets.py` 28/28, `test_key_rotation.py` 7/7, `test_news.py` 11/11, `e2e_test.py` 32/32, Python compilation, and a safe EA-mode main pass with trading disabled. No real order was used for the EA-mode test.
+
+### Cleanup Task 2 — completed preparation — 2026-08-25
+
+The owner approved repository cleanup. A local backup was created outside the repository at `../Gold-MT5-local-backup-20260825` (631 KB) containing runtime `data/`, `logs/` and the private `.env` when present.
+
+Completed in the owner's Git working copy:
+
+- `venv/` removed from Git tracking but retained locally;
+- `__pycache__/` removed from Git tracking;
+- generated `data/` files removed from Git tracking except `data/.gitkeep`;
+- generated log files removed from Git tracking except `logs/.gitkeep`;
+- `.gitignore` expanded for secrets, environments, caches, logs and generated data;
+- temporary patch files removed from the repository.
+
+The next cleanup step is to review/stage only the intended source, documentation and `.gitignore` changes, then commit them. Do not use `git add .` until the staged file list has been checked because the local virtual environment and runtime files remain on disk.
+
 ### Owner's current Windows operating context — 2026-08-24
 
 The owner confirmed that the GitHub working copy is on drive `A:` and is the same application version being run locally. The application is launched by clicking:
@@ -671,6 +713,8 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 - Documented the need to remove the committed virtual environment and generated files.
 - Added the owner's first live Windows/MT5 observation: ticks and candles work, Level 2 is empty, Gemini is not installed, no trade was opened, and repeated outcome logging was observed.
 - Added the owner's confirmed operating context: Vantage demo account, GitHub working copy on drive A:, `start_bot.bat` launcher, `start_report.bat` reporting, future futures-feed preservation, and the current absence of simultaneous feed fusion or a selected execution path.
+- Confirmed a safe real Gemini call: key #1 was rate-limited, key #2 answered `HOLD @ 75%`, no trade occurred because `TRADING_ENABLED=0`, and the signal bridge wrote `NEUTRAL`.
+- Confirmed the current Gemini SDK is deprecated and should be migrated to `google-genai` before further production work.
 
 ---
 

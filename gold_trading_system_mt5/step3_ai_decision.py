@@ -24,6 +24,7 @@ Runs without any key (returns HOLD) so the pipeline never crashes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -64,8 +65,13 @@ def _key_state_path():
     return _KEY_STATE_FILE
 
 
+def _key_id(key: str) -> str:
+    """Return a non-reversible identifier for a key (never store the key)."""
+    return hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:16]
+
+
 def _exhausted_keys() -> List[str]:
-    """Keys currently inside their cooldown (masked list).
+    """Return safe key IDs currently inside their cooldown.
 
     Only the NEW cooldown format is honoured. An OLD state file (the buggy
     "blocked for the whole day" format) is deliberately IGNORED, so upgrading
@@ -83,6 +89,8 @@ def _exhausted_keys() -> List[str]:
                     if u.tzinfo is None:
                         u = u.replace(tzinfo=timezone.utc)
                     if u > now:
+                        # New state files contain only hashed key IDs. Do not
+                        # return or log the raw API key.
                         out.append(str(k))
                 except ValueError:
                     continue
@@ -106,7 +114,9 @@ def _mark_exhausted(key: str) -> None:
         cooldowns = dict(state.get("cooldowns") or {})
         until = datetime.now(timezone.utc) + timedelta(
             minutes=_EXHAUST_COOLDOWN_MINUTES)
-        cooldowns[str(key)] = until.isoformat()
+        # Persist only a one-way ID. Storing the raw key here would expose a
+        # credential if the generated data directory is copied or committed.
+        cooldowns[_key_id(key)] = until.isoformat()
         path.write_text(json.dumps({
             "date": datetime.now().date().isoformat(),
             "cooldowns": cooldowns,
@@ -277,14 +287,14 @@ class AIDecisionEngine:
 
         for model in models:
             tried_model = model
-            for key in self.api_keys:
-                if key in exhausted:
+            for key_index, key in enumerate(self.api_keys, 1):
+                if _key_id(key) in exhausted:
                     continue
                 try:
                     text = self._call_with_key(key, model, prompt)
                     action, confidence, rationale = self._parse_response(text)
-                    logger.info("STEP 3: Gemini -> %s @ %.1f%% (key %s, %s)",
-                                action, confidence, _mask(key), model)
+                    logger.info("STEP 3: Gemini -> %s @ %.1f%% (key #%d, %s)",
+                                action, confidence, key_index, model)
                     return Decision(action=action, confidence=confidence,
                                     rationale=rationale, raw_response=text,
                                     model=model,
@@ -293,9 +303,9 @@ class AIDecisionEngine:
                     last_error = str(exc)[:300]
                     if self._is_quota_error(exc):
                         _mark_exhausted(key)
-                        logger.warning("STEP 3: key %s rate-limited (paused "
+                        logger.warning("STEP 3: key #%d rate-limited (paused "
                                        "%d min); trying the next key.",
-                                       _mask(key), _EXHAUST_COOLDOWN_MINUTES)
+                                       key_index, _EXHAUST_COOLDOWN_MINUTES)
                         continue
                     if self._is_model_unavailable(exc):
                         logger.warning("STEP 3: model %s is no longer "
@@ -303,8 +313,8 @@ class AIDecisionEngine:
                                        model)
                         break                    # move to the next model
                     # other error (network etc.) -> try the next key
-                    logger.warning("STEP 3: call failed (key %s, %s): %s",
-                                   _mask(key), model, last_error[:120])
+                    logger.warning("STEP 3: call failed (key #%d, %s): %s",
+                                   key_index, model, last_error[:120])
                     continue
 
         # nothing worked

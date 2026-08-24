@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutionResult:
     """Outcome of a Step 4 attempt."""
-    status: str                 # "EXECUTED" | "SKIPPED" | "ERROR" | "PENDING"
+    status: str                 # "EXECUTED" | "DEFERRED" | "SKIPPED" | "ERROR" | "PENDING"
     reason: str = ""
     order_id: Optional[int] = None
     symbol: str = config.SYMBOL
@@ -66,8 +66,46 @@ class MT5Executor:
 
     # ------------------------------------------------------------------ #
     def execute(self, decision, snapshot) -> ExecutionResult:
-        """Execute `decision` (from Step 3) using the Step 2 `snapshot`."""
+        """Execute `decision` (from Step 3) using the Step 2 `snapshot`.
+
+        This method is deliberately defensive because tests, integrations and
+        future execution paths may call it directly rather than through
+        ``main._safety_gates``. The master switch and basic snapshot validity
+        must therefore be enforced here too.
+        """
         now = datetime.now(timezone.utc)
+
+        # --- gate 0: master kill switch ----------------------------------------
+        # Do not rely only on main.py: a direct caller must never be able to
+        # bypass TRADING_ENABLED=0 and reach mt5.order_send().
+        if not getattr(config, "TRADING_ENABLED", True):
+            logger.info("STEP 4: SKIPPED — trading disabled (TRADING_ENABLED=0).")
+            return ExecutionResult(
+                status="SKIPPED",
+                reason="trading disabled (TRADING_ENABLED=0)",
+                symbol=self.symbol, timestamp=now)
+
+        # --- gate 0a: execution owner -----------------------------------------
+        # Direct Python order placement is allowed only in python mode. In EA
+        # mode the bridge is the only path allowed to produce an order signal.
+        mode = getattr(config, "EXECUTION_MODE", "none")
+        if mode != "python":
+            logger.info("STEP 4: SKIPPED — Python executor disabled in %s mode.",
+                        mode)
+            return ExecutionResult(
+                status="SKIPPED",
+                reason=f"Python execution disabled (EXECUTION_MODE={mode})",
+                symbol=self.symbol, timestamp=now)
+
+        # --- gate 0b: valid market snapshot -----------------------------------
+        # An empty/no-data snapshot must never be turned into a real order using
+        # the fallback ATR and the current MT5 price.
+        if snapshot is None or float(getattr(snapshot, "price", 0.0) or 0.0) <= 0:
+            logger.info("STEP 4: SKIPPED — empty or invalid market snapshot.")
+            return ExecutionResult(
+                status="SKIPPED",
+                reason="empty or invalid market snapshot",
+                symbol=self.symbol, timestamp=now)
 
         # --- gate 1: confidence -------------------------------------------------
         if decision.confidence < config.AI_CONFIDENCE_THRESHOLD:

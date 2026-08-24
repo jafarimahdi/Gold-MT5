@@ -81,7 +81,11 @@ class TradeMonitor:
                 if entry != 1:            # DEAL_ENTRY_OUT == 1
                     continue
                 out.append({
-                    "position_id": getattr(d, "position_id", d.ticket),
+                    # `ticket` is the unique MT5 deal ID. Keep it separate
+                    # from position_id because one position can have more
+                    # than one deal (partial closes, reversals, etc.).
+                    "deal_id": getattr(d, "ticket", None),
+                    "position_id": getattr(d, "position_id", getattr(d, "ticket", None)),
                     "symbol": getattr(d, "symbol", ""),
                     "type": "BUY" if getattr(d, "type", 1) == 0 else "SELL",
                     "price": float(getattr(d, "price", 0.0) or 0.0),

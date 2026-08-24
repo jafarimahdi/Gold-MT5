@@ -131,6 +131,9 @@ fake_mt5.symbol_info_tick = _symbol_info_tick
 fake_mt5.account_info = _account_info
 fake_mt5.order_send = _order_send
 fake_mt5.positions_get = _positions_get
+# The real monitor/risk code queries closed deals. Include an empty mocked
+# result so the end-to-end test does not emit misleading missing-API warnings.
+fake_mt5.history_deals_get = lambda *args, **kwargs: []
 fake_mt5.symbol_select = _symbol_select
 fake_mt5.market_book_add = _market_book_add
 fake_mt5.market_book_release = _market_book_release
@@ -143,10 +146,20 @@ sys.modules["MetaTrader5"] = fake_mt5
 import os
 import config
 config.GEMINI_API_KEY = "test-key"          # enable the "live" AI path
+# Override the derived multi-key list too. Otherwise a user's real keys from
+# .env can leak into this mocked test (even though no real API call is made).
+config.GEMINI_API_KEYS = ["test-key"]
 os.environ["GEMINI_API_KEY"] = "test-key"   # survive run_pipeline's reload_env()
 config.AI_CONFIDENCE_THRESHOLD = 70.0
+# This test installs fake Gemini and fake MT5 modules before importing the
+# pipeline. It is therefore safe to enable the execution gate for the mock
+# order assertions, even when the user's real .env has trading disabled.
 
+config.TRADING_ENABLED = True
+# Direct order assertions in this test use the Python execution path.
+config.EXECUTION_MODE = "python"
 from step1_data_acquisition import DataAcquisition
+
 from step2_market_analysis import analyze_market, _synthetic_market_data
 from step3_ai_decision import AIDecisionEngine, Decision
 from step4_mt5_execution import MT5Executor

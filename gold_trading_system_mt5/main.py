@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import logging
 import sys
 from datetime import datetime
@@ -417,8 +418,39 @@ def run_step3(snapshot):
 
 
 def run_step4(decision, snapshot):
-    from step4_mt5_execution import MT5Executor
-    result = MT5Executor().execute(decision, snapshot)
+    """Route execution to exactly one owner: none, Python, or EA."""
+    from step4_mt5_execution import ExecutionResult, MT5Executor
+
+    mode = getattr(config, "EXECUTION_MODE", "none")
+    if not config.TRADING_ENABLED:
+        result = ExecutionResult(
+            status="SKIPPED",
+            reason="trading disabled (TRADING_ENABLED=0)",
+            symbol=config.MT5_SYMBOL,
+            timestamp=datetime.now().astimezone())
+    elif mode == "ea":
+        result = ExecutionResult(
+            status="DEFERRED",
+            reason="EA is the execution owner (signal bridge only)",
+            symbol=config.MT5_SYMBOL,
+            timestamp=datetime.now().astimezone())
+    elif mode == "none":
+        result = ExecutionResult(
+            status="SKIPPED",
+            reason="execution disabled (EXECUTION_MODE=none)",
+            symbol=config.MT5_SYMBOL,
+            timestamp=datetime.now().astimezone())
+    elif mode == "python":
+        result = MT5Executor().execute(decision, snapshot)
+    else:
+        # config.py normalises invalid values to none, but keep this defensive
+        # fallback in case a caller changes the module value directly.
+        result = ExecutionResult(
+            status="SKIPPED",
+            reason=f"unknown execution mode: {mode}",
+            symbol=config.MT5_SYMBOL,
+            timestamp=datetime.now().astimezone())
+
     _record("STEP 4  EXECUTION", f"{result.status} — {result.reason}"
             if result.reason else f"{result.status}")
     return result
@@ -432,8 +464,19 @@ def run_step5():
 
 
 def run_signal_bridge(snapshot, decision) -> None:
-    """Write the MT5 signal file (read by GoldTradingEA.mq5 / indicator)."""
+    """Write the MT5 signal file, with EA as the only actionable owner."""
     from mt5_signal_bridge import write_signal
+    from step3_ai_decision import Decision
+
+    mode = getattr(config, "EXECUTION_MODE", "none")
+    if mode != "ea":
+        # Clear any old actionable EA signal when Python or no execution owns
+        # the run. This prevents a previously attached EA from acting on stale
+        # instructions after the mode is changed.
+        decision = Decision(
+            action="HOLD", confidence=0.0,
+            rationale=f"signal neutralised (EXECUTION_MODE={mode})")
+
     path = write_signal(snapshot, decision)
     if path is not None:
         _record("MT5 SIGNAL BRIDGE", f"OK -> {path.name}")
@@ -443,6 +486,57 @@ def run_signal_bridge(snapshot, decision) -> None:
 
 _OUTCOME_LOG_FIELDS = ["timestamp", "order_id", "symbol", "side", "pnl",
                        "exit_price", "comment"]
+_OUTCOME_KEYS_FILE = DATA_DIR / "logged_outcome_deals.json"
+
+
+def _outcome_signature(deal: dict) -> str:
+    """Stable fallback identity for old rows that have no MT5 deal ID."""
+    return "sig:" + "|".join(str(deal.get(k, "")) for k in (
+        "position_id", "symbol", "type", "pnl", "price"))
+
+
+def _load_logged_outcome_keys() -> set:
+    """Load persisted deal IDs and seed signatures from the existing CSV.
+
+    The CSV already contains rows from older versions that did not store a
+    unique MT5 deal ID. Their stable fields are used as a one-time fallback so
+    the first run after this fix does not append the same historical deals
+    again.
+    """
+    keys = set()
+    try:
+        if _OUTCOME_KEYS_FILE.exists():
+            state = json.loads(_OUTCOME_KEYS_FILE.read_text(encoding="utf-8"))
+            keys.update(str(k) for k in (state.get("keys") or []))
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    csv_path = DATA_DIR / "trade_outcomes.csv"
+    try:
+        if csv_path.exists():
+            with open(csv_path, "r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    keys.add(_outcome_signature({
+                        "position_id": row.get("order_id", ""),
+                        "symbol": row.get("symbol", ""),
+                        "type": row.get("side", ""),
+                        "pnl": row.get("pnl", ""),
+                        "price": row.get("exit_price", ""),
+                    }))
+    except (OSError, csv.Error):
+        pass
+    return keys
+
+
+def _save_logged_outcome_keys(keys: set) -> None:
+    try:
+        _OUTCOME_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _OUTCOME_KEYS_FILE.write_text(json.dumps({
+            "keys": sorted(keys),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not persist logged outcome IDs: %s", exc)
 
 
 def log_trade_outcome(order_id, symbol, side, pnl, exit_price,
@@ -581,16 +675,30 @@ def run_pipeline() -> None:
         _record("STEP 5  MONITORING", f"ERROR — {exc}")
 
     # ---- trade-outcome logging (closed MT5 deals -> data/trade_outcomes.csv) --
+    # MT5 history_deals_get returns all matching deals on every poll. Persist
+    # unique IDs/signatures so the same closed deal is logged only once.
     try:
         from step5_monitoring import TradeMonitor
+        logged_keys = _load_logged_outcome_keys()
+        new_keys = set()
         for deal in TradeMonitor().check_closed_deals():
+            deal_id = deal.get("deal_id")
+            id_key = f"deal:{deal_id}" if deal_id not in (None, "", 0) else ""
+            sig_key = _outcome_signature(deal)
+            if (id_key and id_key in logged_keys) or sig_key in logged_keys:
+                continue
             log_trade_outcome(
-                order_id=deal.get("position_id"),
+                order_id=deal_id or deal.get("position_id"),
                 symbol=deal.get("symbol", config.MT5_SYMBOL),
                 side=deal.get("type", ""),
                 pnl=deal.get("pnl", 0.0),
                 exit_price=deal.get("price", 0.0),
                 comment="closed deal")
+            if id_key:
+                new_keys.add(id_key)
+            new_keys.add(sig_key)
+        if new_keys:
+            _save_logged_outcome_keys(logged_keys | new_keys)
     except Exception as exc:
         logger.warning("trade-outcome logging failed: %s", exc)
 

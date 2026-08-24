@@ -122,6 +122,13 @@ def _refresh() -> None:
     # master on/off switch: 0 = analyse only, never send a trade signal
     g["TRADING_ENABLED"] = _fget("TRADING_ENABLED", "1") == "1"
 
+    # execution routing: one and only one order owner
+    #   none   = analysis only; clear/neutralise the EA signal
+    #   python = Python MT5 SDK may send orders; EA receives neutral signal
+    #   ea     = Python writes actionable signals; only the MQL5 EA trades
+    mode = _fget("EXECUTION_MODE", "none").strip().lower()
+    g["EXECUTION_MODE"] = mode if mode in ("none", "python", "ea") else "none"
+
     # ---- STEP 2 analysis parameters ----------------------------------------
     g["PRICE_RESOLUTION"] = _ffloat("PRICE_RESOLUTION", 0.1)
     g["LARGE_ORDER_THRESHOLD"] = _ffloat("LARGE_ORDER_THRESHOLD", 100.0)

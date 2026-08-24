@@ -90,9 +90,13 @@ def test_signal_bridge_pct():
 
 
 def test_config_defaults():
-    check("MT5 (trade) symbol defaults to XAUUSD", config.MT5_SYMBOL == "XAUUSD")
-    check("DATA symbol is XAUUSD in the MT5 version",
-          config.DATA_SYMBOL == "XAUUSD")
+    # Broker symbols may have suffixes such as XAUUSD+, XAUUSD.i or XAUUSD.m.
+    # Tests should validate the canonical market, not require one exact broker
+    # spelling.
+    check("MT5 (trade) symbol resolves to XAUUSD",
+          normalize_symbol(config.MT5_SYMBOL) == "XAUUSD")
+    check("DATA symbol resolves to XAUUSD in the MT5 version",
+          normalize_symbol(config.DATA_SYMBOL) == "XAUUSD")
 
 
 def main():
