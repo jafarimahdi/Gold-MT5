@@ -1,0 +1,68 @@
+============================================================
+ UPDATE — NEWS + MACRO + HISTORY + REPORT (final)
+============================================================
+
+STEP 1 — Add these NEW files to your project folder
+        (C:\Users\Jafar\Documents\gold_trading_system_mt5)
+   - news.py              (free news reader)
+   - macro.py             (free DXY / 10Y / VIX reader)
+   - history_download.py  (download 6 months of past data)
+   - robot_report.py      (★ THE main report tool — use this, not review.py)
+   - review.py            (older, simpler report — optional)
+   - test_news.py, test_key_rotation.py  (optional tests)
+
+STEP 2 — REPLACE these files (copy over the old ones)
+   - config.py
+   - main.py
+   - step3_ai_decision.py
+   - step2_market_analysis.py
+   - backtest.py
+
+STEP 3 — Edit your .env (open with Notepad)
+
+   3a) FIND this line and change 20 to 10:
+       AI_MIN_SIGNAL_STRENGTH=20   ->   AI_MIN_SIGNAL_STRENGTH=10
+
+   3b) KEEP this as it is (every 1 minute is fine):
+       AI_MIN_INTERVAL_MINUTES=1
+
+   3c) ADD these lines at the bottom of the file:
+       # ---- live news headlines for the AI (FREE, Google News RSS) ----
+       NEWS_ENABLED=1
+       NEWS_CACHE_MINUTES=15
+       NEWS_MAX_HEADLINES=20
+       NEWS_TIMEOUT=8
+
+       # ---- live macro data for the AI (FREE, Yahoo Finance) ----
+       MACRO_ENABLED=1
+       MACRO_CACHE_MINUTES=15
+       MACRO_TIMEOUT=8
+
+       # ---- news-time guard (hidden in the code before) ----
+       NEWS_WARNING_MINUTES=30
+       NEWS_BLACKOUT_BEFORE_MINUTES=15
+       NEWS_BLACKOUT_AFTER_MINUTES=30
+       NEWS_WIDEN_STOP_MULT=1.5
+       NEWS_REDUCE_SIZE_PCT=0.5
+
+STEP 4 — Restart the bot (close window, run start_bot.bat).
+
+HOW TO CHECK IT WORKED
+   In the terminal you should now see:
+       news: 20 fresh headlines fetched.
+       macro: DXY 98.xx, 10Y x.xxx%, VIX xx.xx
+
+THE MAIN REPORT TOOL (use this every week)
+   ★ EASIEST: double-click  start_report.bat
+        -> a menu asks: 1 / 3 / 7 / 30 / A
+        -> prints the report AND opens a pretty HTML page in your browser
+
+   Or manually (in Git Bash):
+   python robot_report.py            -> full report (all time)
+   python robot_report.py --days 7   -> last week
+   python robot_report.py --days 30  -> last month
+
+OTHER OPTIONAL TOOLS
+   python history_download.py                    -> save 6 months of data
+   python backtest.py --replay data/history_XAUUSD__M1.npz  -> test on history
+============================================================

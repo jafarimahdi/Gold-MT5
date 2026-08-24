@@ -1,0 +1,17 @@
+numpy>=1.24
+pandas>=2.0
+requests>=2.31
+textblob>=0.17
+
+# MT5 data + execution (Windows only - this version READS data from MT5)
+MetaTrader5
+
+# ------------------------------------------------------------------
+# Optional per-step dependencies (uncomment as you implement each step)
+# ------------------------------------------------------------------
+# python-dotenv           # nicer .env parsing (config.py works without it too)
+# databento               # STEP 1 — live market data (alternative to Rithmic)
+# google-generativeai     # STEP 3 — Gemini AI decisions
+
+# Rithmic (STEP 1) — the bridge package that talks to Rithmic's API
+async-rithmic
