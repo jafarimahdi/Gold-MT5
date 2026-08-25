@@ -28,7 +28,6 @@ import hashlib
 import json
 import logging
 import re
-import time
 import warnings
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
@@ -51,9 +50,13 @@ logger = logging.getLogger(__name__)
 # Key state: which keys are exhausted TODAY (persisted so a restart keeps it)
 # --------------------------------------------------------------------------- #
 _KEY_STATE_FILE = None
-# A key that hits a rate limit is only skipped for this long (not all day).
-# Per-minute limits clear within a minute, so 20 minutes is a generous pause.
-_EXHAUST_COOLDOWN_MINUTES = 20
+# A key that hits a rate limit is skipped on later cycles for this long.
+# This cooldown is not a pause between keys; failover is immediate.
+def _key_cooldown_minutes() -> int:
+    try:
+        return max(0, int(getattr(config, "AI_KEY_COOLDOWN_MINUTES", 20)))
+    except (TypeError, ValueError):
+        return 20
 
 
 def _key_state_path():
@@ -113,7 +116,7 @@ def _mark_exhausted(key: str) -> None:
             state = {}
         cooldowns = dict(state.get("cooldowns") or {})
         until = datetime.now(timezone.utc) + timedelta(
-            minutes=_EXHAUST_COOLDOWN_MINUTES)
+            minutes=_key_cooldown_minutes())
         # Persist only a one-way ID. Storing the raw key here would expose a
         # credential if the generated data directory is copied or committed.
         cooldowns[_key_id(key)] = until.isoformat()
@@ -230,31 +233,17 @@ class AIDecisionEngine:
                 or "no longer available" in msg.lower()
                 or "not available" in msg.lower() or "deprecated" in msg.lower())
 
-    def _call_with_key(self, key: str, model: str, prompt: str,
-                       max_attempts: int = 3):
-        """One Gemini call with `key` and `model`. Raises on failure.
+    def _call_with_key(self, key: str, model: str, prompt: str):
+        """Make exactly one Gemini call with `key` and `model`.
 
-        A PER-MINUTE rate limit clears within a minute, so we wait a moment
-        and retry. A per-DAY quota error is raised immediately so the engine
-        moves to the NEXT key without wasting time.
+        A key failure is handled by `decide()`, which immediately moves to the
+        next key. There is deliberately no sleep or retry here: the caller
+        wants failover without waiting for a per-minute quota to recover.
         """
         genai.configure(api_key=key)
         gm = genai.GenerativeModel(model)
-        last_exc: Optional[Exception] = None
-        for attempt in range(max_attempts):
-            try:
-                response = gm.generate_content(prompt)
-                return (response.text or "").strip()
-            except Exception as exc:
-                last_exc = exc
-                if not self._is_quota_error(exc):
-                    raise
-                if not self._is_minute_limit(exc):
-                    raise                       # daily quota -> fail over fast
-                if attempt < max_attempts - 1:
-                    time.sleep(min(3 * (attempt + 1), 8))   # 3s, 6s backoff
-        raise last_exc if last_exc is not None else RuntimeError(
-            "Gemini call failed")
+        response = gm.generate_content(prompt)
+        return (response.text or "").strip()
 
     # ------------------------------------------------------------------ #
     def decide(self, snapshot) -> Decision:
@@ -303,9 +292,10 @@ class AIDecisionEngine:
                     last_error = str(exc)[:300]
                     if self._is_quota_error(exc):
                         _mark_exhausted(key)
-                        logger.warning("STEP 3: key #%d rate-limited (paused "
-                                       "%d min); trying the next key.",
-                                       key_index, _EXHAUST_COOLDOWN_MINUTES)
+                        logger.warning("STEP 3: key #%d rate-limited (skipping "
+                                       "for %d min on later cycles); trying the "
+                                       "next key immediately.",
+                                       key_index, _key_cooldown_minutes())
                         continue
                     if self._is_model_unavailable(exc):
                         logger.warning("STEP 3: model %s is no longer "

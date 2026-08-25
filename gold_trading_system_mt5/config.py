@@ -161,6 +161,9 @@ def _refresh() -> None:
     # projects (~4,500/day), every 1 minute (~1,440/day) is only ~32%.
     g["AI_MIN_INTERVAL_MINUTES"] = _fint("AI_MIN_INTERVAL_MINUTES", 1)
     g["AI_MAX_CALLS_PER_DAY"] = _fint("AI_MAX_CALLS_PER_DAY", 2000)
+    # How long a rate-limited key is skipped on later cycles. This is NOT a
+    # wait between keys: failover to the next key is immediate.
+    g["AI_KEY_COOLDOWN_MINUTES"] = _fint("AI_KEY_COOLDOWN_MINUTES", 20)
     g["RISK_PER_TRADE_PCT"] = _ffloat("RISK_PER_TRADE_PCT", 1.0)
     g["STOP_LOSS_ATR_MULT"] = _ffloat("STOP_LOSS_ATR_MULT", 1.5)
     g["TAKE_PROFIT_ATR_MULT"] = _ffloat("TAKE_PROFIT_ATR_MULT", 3.0)

@@ -414,6 +414,12 @@ The execution-mode update was implemented and tested in the development workspac
 
 The patched workspace tests passed: `test_session_risk.py` 25/25, `test_markets.py` 28/28, `test_key_rotation.py` 7/7, `test_news.py` 11/11, `e2e_test.py` 32/32, Python compilation, and a safe EA-mode main pass with trading disabled. No real order was used for the EA-mode test.
 
+### Task 3 — immediate Gemini key failover prepared — 2026-08-25
+
+The owner requested no waiting when one Gemini key fails. Each key/model combination now receives one attempt only. A rate-limited or otherwise failed key is marked and the next key is tried immediately; there is no 3-second/6-second retry sleep between keys. The key cooldown remains only for later pipeline cycles and is configurable with `AI_KEY_COOLDOWN_MINUTES` (default 20); it is not a wait during current failover.
+
+The key-rotation test was expanded to confirm per-minute rate-limit failover completes immediately and that later-cycle cooldown still works. The owner applied the update locally and confirmed `test_key_rotation.py` 9/9 passed. The update is ready to commit with the other Task 3 changes.
+
 ### Cleanup Task 2 — completed preparation — 2026-08-25
 
 The owner approved repository cleanup. A local backup was created outside the repository at `../Gold-MT5-local-backup-20260825` (631 KB) containing runtime `data/`, `logs/` and the private `.env` when present.
@@ -715,6 +721,7 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 - Added the owner's confirmed operating context: Vantage demo account, GitHub working copy on drive A:, `start_bot.bat` launcher, `start_report.bat` reporting, future futures-feed preservation, and the current absence of simultaneous feed fusion or a selected execution path.
 - Confirmed a safe real Gemini call: key #1 was rate-limited, key #2 answered `HOLD @ 75%`, no trade occurred because `TRADING_ENABLED=0`, and the signal bridge wrote `NEUTRAL`.
 - Confirmed the current Gemini SDK is deprecated and should be migrated to `google-genai` before further production work.
+- Implemented and locally verified immediate Gemini key failover with no artificial wait; `test_key_rotation.py` passed 9/9 and the cooldown setting was documented in `.env.example`.
 
 ---
 

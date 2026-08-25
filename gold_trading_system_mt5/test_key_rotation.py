@@ -18,6 +18,7 @@ Usage:  python test_key_rotation.py
 
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -116,6 +117,37 @@ def main():
         d3 = s3.AIDecisionEngine().decide(snap)
         check("all keys dead -> HOLD (no crash)",
               d3.action == "HOLD" and d3.confidence == 0.0)
+
+        # ---- scenario 4: per-minute limit -> next key immediately ----------
+        class _MinuteLimit:
+            last_key = None
+
+            @staticmethod
+            def configure(api_key=None, **kw):
+                _MinuteLimit.last_key = api_key
+
+            class GenerativeModel:
+                def __init__(self, model):
+                    self.model = model
+
+                def generate_content(self, prompt):
+                    if _MinuteLimit.last_key == "minuteA":
+                        raise RuntimeError(
+                            "429 RESOURCE_EXHAUSTED: per minute rate limit")
+                    return SimpleNamespace(
+                        text='{"action":"BUY","confidence":80,'
+                             '"rationale":"minute-limit failover"}')
+
+        config.GEMINI_API_KEYS = ["minuteA", "minuteB"]
+        _clean_state()
+        s3.genai = _MinuteLimit
+        started = time.perf_counter()
+        d4 = s3.AIDecisionEngine().decide(snap)
+        elapsed = time.perf_counter() - started
+        check("per-minute limit fails over immediately",
+              d4.action == "BUY" and elapsed < 1.0)
+        check("per-minute key is cooled down later",
+              s3._key_id("minuteA") in s3._exhausted_keys())
     finally:
         s3.genai = real_genai
         _clean_state()
