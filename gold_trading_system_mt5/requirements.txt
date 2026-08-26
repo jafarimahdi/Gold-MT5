@@ -11,7 +11,7 @@ MetaTrader5
 # ------------------------------------------------------------------
 # python-dotenv           # nicer .env parsing (config.py works without it too)
 # databento               # STEP 1 — live market data (alternative to Rithmic)
-# google-generativeai     # STEP 3 — Gemini AI decisions
+google-genai>=1.0
 
 # Rithmic (STEP 1) — the bridge package that talks to Rithmic's API
 async-rithmic

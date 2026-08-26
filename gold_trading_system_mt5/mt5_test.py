@@ -19,6 +19,7 @@ Then run:  python main.py
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime, timedelta
 
 import config
@@ -44,17 +45,28 @@ def main() -> int:
         print("  (The MT5 terminal must also be installed and running.)")
         return 1
 
+    init_kwargs = {}
+    if config.MT5_TERMINAL_PATH:
+        init_kwargs["path"] = config.MT5_TERMINAL_PATH
     if config.MT5_LOGIN:
-        ok = mt5.initialize(login=config.MT5_LOGIN,
-                            password=config.MT5_PASSWORD,
-                            server=config.MT5_SERVER)
-    else:
-        ok = mt5.initialize()
+        init_kwargs.update(login=config.MT5_LOGIN,
+                           password=config.MT5_PASSWORD,
+                           server=config.MT5_SERVER)
+    ok = mt5.initialize(**init_kwargs)
     if not ok:
         print(f"ERROR: mt5.initialize() failed: {mt5.last_error()}")
-        print("  Make sure the MT5 terminal is RUNNING and logged into an")
-        print("  account (demo is fine).")
+        print("  Make sure the Pepperstone MT5 terminal is RUNNING and logged")
+        print("  into an account (demo is fine).")
         return 1
+
+    terminal = mt5.terminal_info()
+    account = mt5.account_info()
+    actual_path = getattr(terminal, "path", "") if terminal else ""
+    actual_company = getattr(account, "company", "") if account else ""
+    actual_server = getattr(account, "server", "") if account else ""
+    print(f"  connected path: {actual_path or '(not reported)'}")
+    print(f"  broker/company : {actual_company or '(not reported)'}")
+    print(f"  account server: {actual_server or '(not reported)'}")
 
     symbol = config.MT5_SYMBOL
     print(f"Connected to terminal. Checking symbol '{symbol}' ...")
@@ -100,17 +112,34 @@ def main() -> int:
     # ---- 2) Level 2 depth ------------------------------------------------
     mt5.symbol_select(symbol, True)
     try:
-        mt5.market_book_add(symbol)
-        book = mt5.market_book_get(symbol)
+        added = mt5.market_book_add(symbol)
+        book = None
+        # Market-book subscription can take a short time to populate. Retry
+        # read-only several times before declaring that Level 2 is empty.
+        if added:
+            for _ in range(6):
+                book = mt5.market_book_get(symbol)
+                if book:
+                    break
+                time.sleep(0.5)
         if book:
             print(f"  [2] LEVEL 2 : {len(book)} depth entries (first 5 shown):")
             for e in book[:5]:
-                side = "BID" if e.type == 0 else "ASK"
+                entry_type = int(e.type)
+                buy_type = int(getattr(mt5, "BOOK_TYPE_BUY", 2))
+                sell_type = int(getattr(mt5, "BOOK_TYPE_SELL", 1))
+                if entry_type == buy_type or (entry_type == 0 and buy_type != 0):
+                    side = "BID"
+                elif entry_type == sell_type:
+                    side = "ASK"
+                else:
+                    side = f"TYPE_{entry_type}"
                 print(f"          {side}  {e.price} x {e.volume}")
+        elif not added:
+            print(f"  [2] LEVEL 2 : subscription failed ({mt5.last_error()})")
         else:
-            print("  [2] LEVEL 2 : empty — your broker may not publish depth")
-            print("                for this symbol, or it takes a moment to fill.")
-        mt5.market_book_release(symbol)
+            print("  [2] LEVEL 2 : empty after 3 seconds — broker may not publish depth")
+        mt5.market_book_release(symbol) if added else None
     except Exception as exc:
         print(f"  [2] LEVEL 2 : error: {exc}")
 

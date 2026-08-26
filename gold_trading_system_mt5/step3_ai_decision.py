@@ -33,14 +33,26 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-# The generativeai package prints a deprecation FutureWarning on import; the
-# bot still works, so silence it to keep the log clean.
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    try:
-        import google.generativeai as genai
-    except ImportError:  # pragma: no cover
-        genai = None
+# Prefer Google's supported google-genai SDK. Keep a temporary legacy fallback
+# so an existing local environment can still run while it is being upgraded.
+try:
+    from google import genai as _modern_genai
+except ImportError:  # pragma: no cover
+    _modern_genai = None
+
+if _modern_genai is not None:
+    genai = _modern_genai
+    _GENAI_SDK = "google-genai"
+else:
+    # The old package prints a deprecation warning on import; keep the fallback
+    # quiet and make the warning visible in the application status instead.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            import google.generativeai as genai
+        except ImportError:  # pragma: no cover
+            genai = None
+    _GENAI_SDK = "google-generativeai-legacy" if genai is not None else "missing"
 
 import config
 
@@ -240,9 +252,18 @@ class AIDecisionEngine:
         next key. There is deliberately no sleep or retry here: the caller
         wants failover without waiting for a per-minute quota to recover.
         """
-        genai.configure(api_key=key)
-        gm = genai.GenerativeModel(model)
-        response = gm.generate_content(prompt)
+        if genai is _modern_genai:
+            client = genai.Client(api_key=key)
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+        else:
+            # Temporary fallback for environments that have not installed the
+            # supported SDK yet, and for the legacy mock tests.
+            genai.configure(api_key=key)
+            gm = genai.GenerativeModel(model)
+            response = gm.generate_content(prompt)
         return (response.text or "").strip()
 
     # ------------------------------------------------------------------ #
@@ -263,10 +284,10 @@ class AIDecisionEngine:
                             rationale="Gemini API key not configured.",
                             timestamp=datetime.now(timezone.utc))
         if genai is None:
-            logger.warning("STEP 3: 'google-generativeai' not installed "
-                           "(pip install google-generativeai) -> HOLD.")
+            logger.warning("STEP 3: Gemini SDK not installed "
+                           "(pip install google-genai) -> HOLD.")
             return Decision(action="HOLD", confidence=0.0,
-                            rationale="google-generativeai SDK not installed.",
+                            rationale="google-genai SDK not installed.",
                             timestamp=datetime.now(timezone.utc))
 
         models = getattr(config, "GEMINI_MODELS", None) or [self.model]

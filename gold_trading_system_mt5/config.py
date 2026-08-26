@@ -109,8 +109,10 @@ def _refresh() -> None:
     """(Re)bind every module constant from the environment + .env."""
     g = globals()
 
-    # ---- runtime / symbol settings -----------------------------------------
+    # ---- runtime / broker / symbol settings -------------------------------
     g["DEBUG"] = _fget("DEBUG", "0") == "1"
+    g["BROKER_NAME"] = _fget("BROKER_NAME", "")
+    g["MT5_TERMINAL_PATH"] = _fget("MT5_TERMINAL_PATH", "")
     g["SYMBOL"] = _fget("TRADING_SYMBOL", "XAUUSD")
     g["MT5_SYMBOL"] = _fget("MT5_SYMBOL", g["SYMBOL"])
     g["TIMEFRAME"] = _fget("TIMEFRAME", "M1")
@@ -267,6 +269,7 @@ def _refresh() -> None:
 
     # ---- MT5 signal bridge --------------------------------------------------
     g["MT5_SIGNAL_FILE"] = _fget("MT5_SIGNAL_FILE", "")
+    g["SIGNAL_MAX_AGE_SECONDS"] = _fint("SIGNAL_MAX_AGE_SECONDS", 180)
 
 
 _load_dotenv(BASE_DIR / ".env")
@@ -290,5 +293,8 @@ def credentials_configured() -> dict:
         "databento": bool(DATABENTO_API_KEY),
         "rithmic": bool(RITHMIC_USERNAME and RITHMIC_PASSWORD),
         "gemini": bool(GEMINI_API_KEY),
-        "mt5": bool(MT5_LOGIN and MT5_PASSWORD and MT5_SERVER),
+        # login=0 intentionally means use the already-running terminal.
+        "mt5": bool((MT5_LOGIN == 0 and MT5_SYMBOL) or
+                    (MT5_LOGIN and MT5_PASSWORD and MT5_SERVER)),
+
     }

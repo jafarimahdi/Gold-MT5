@@ -737,6 +737,11 @@ def main() -> int:
     setup_logging()
     creds = config.credentials_configured()
     logger.info("Credentials: %s", creds)
+    logger.info("Runtime: broker=%s execution=%s trading=%s symbol=%s",
+                config.BROKER_NAME or "(not configured)",
+                config.EXECUTION_MODE,
+                "enabled" if config.TRADING_ENABLED else "disabled",
+                config.MT5_SYMBOL)
 
     # only ONE bot at a time (a second copy would double the work and fight
     # over the signal file). Refuse to start if another instance is running.

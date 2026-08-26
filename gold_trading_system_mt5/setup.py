@@ -13,7 +13,7 @@ def _requirements() -> list:
 
 setup(
     name="gold_trading_system",
-    version="0.2.0",
+    version="0.4.5",
     description="Automated gold (XAUUSD) trading pipeline: "
                 "data -> analysis -> AI decision -> execution -> monitoring",
     packages=find_packages(),
@@ -33,6 +33,8 @@ setup(
         "step4_mt5_execution",
         "step5_monitoring",
         "mt5_signal_bridge",
+        "broker_diagnostic",
+        "run_all_tests",
     ],
     install_requires=_requirements(),
     python_requires=">=3.9",

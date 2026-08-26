@@ -589,6 +589,34 @@ TICK_FLAG_BUY = 32
 TICK_FLAG_SELL = 64
 
 
+def mt5_book_to_depths(book: Any, mt5_module: Any) -> Tuple[Dict[float, float], Dict[float, float]]:
+    """Convert MT5 BookInfo entries to (bids, asks).
+
+    MQL5/MT5 uses BOOK_TYPE_SELL=1 for sell/ask entries and
+    BOOK_TYPE_BUY=2 for buy/bid entries. A type-0 bid fallback is retained for
+    simple test/fallback feeds, but real type-1/type-2 values are never
+    collapsed onto one side.
+    """
+    bids: Dict[float, float] = {}
+    asks: Dict[float, float] = {}
+    sell_type = int(getattr(mt5_module, "BOOK_TYPE_SELL", 1))
+    buy_type = int(getattr(mt5_module, "BOOK_TYPE_BUY", 2))
+    for entry in book or []:
+        try:
+            px = float(entry.price)
+            vol = float(entry.volume)
+            entry_type = int(entry.type)
+            if vol <= 0:
+                continue
+            if entry_type == buy_type or (entry_type == 0 and buy_type != 0):
+                bids[px] = vol
+            elif entry_type == sell_type:
+                asks[px] = vol
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return bids, asks
+
+
 class MT5Provider(BaseProvider):
     """Reads live data straight from a running MetaTrader 5 terminal.
 
@@ -619,6 +647,7 @@ class MT5Provider(BaseProvider):
             "login": config.MT5_LOGIN,
             "password": config.MT5_PASSWORD,
             "server": config.MT5_SERVER,
+            "terminal_path": config.MT5_TERMINAL_PATH,
         }
 
     def connect(self) -> None:
@@ -631,12 +660,16 @@ class MT5Provider(BaseProvider):
                 "pip install MetaTrader5") from exc
 
         creds = self.credentials()
+        init_kwargs = {}
+        if creds["terminal_path"]:
+            # Explicit path is important when several broker terminals are
+            # installed. Without it, MT5 uses the running/default terminal.
+            init_kwargs["path"] = creds["terminal_path"]
         if creds["login"]:
-            ok = mt5.initialize(login=creds["login"],
-                                password=creds["password"],
-                                server=creds["server"])
-        else:
-            ok = mt5.initialize()
+            init_kwargs.update(login=creds["login"],
+                               password=creds["password"],
+                               server=creds["server"])
+        ok = mt5.initialize(**init_kwargs)
         if not ok:
             raise ProviderNotAvailable(
                 f"MT5 initialize() failed: {mt5.last_error()}. Is the MT5 "
@@ -644,7 +677,15 @@ class MT5Provider(BaseProvider):
 
         self._mt5 = mt5
         self._symbol = creds["symbol"]
-        mt5.symbol_select(self._symbol, True)
+        if not mt5.symbol_select(self._symbol, True):
+            err = getattr(mt5, "last_error", lambda: "unknown error")()
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            raise ProviderNotAvailable(
+                f"MT5 symbol '{self._symbol}' could not be selected: {err}. "
+                "Confirm the exact broker symbol in Market Watch.")
         try:
             mt5.market_book_add(self._symbol)   # subscribe to depth
         except Exception:
@@ -679,20 +720,7 @@ class MT5Provider(BaseProvider):
         for _ in range(2):
             book = mt5.market_book_get(symbol)
             if book:
-                bids: Dict[float, float] = {}
-                asks: Dict[float, float] = {}
-                for entry in book:
-                    try:
-                        px = float(entry.price)
-                        vol = float(entry.volume)
-                        if vol <= 0:
-                            continue
-                        if int(entry.type) == 0:      # sell side = bid
-                            bids[px] = vol
-                        else:                          # buy side = ask
-                            asks[px] = vol
-                    except (TypeError, ValueError, AttributeError):
-                        continue
+                bids, asks = mt5_book_to_depths(book, mt5)
                 if bids or asks:
                     self.handle_depth(bids, asks)
             time.sleep(0.5)

@@ -22,7 +22,7 @@ python -m venv venv
 
 :venvready
 call venv\Scripts\activate.bat
-python -c "import pandas" >nul 2>nul
+python -c "import pandas, MetaTrader5; from google import genai" >nul 2>nul
 if errorlevel 1 pip install -r requirements.txt
 
 echo.

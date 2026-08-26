@@ -23,6 +23,7 @@ MT5 calls are guarded: without the SDK this module safely reports PENDING.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -192,6 +193,106 @@ class MT5Executor:
             return price - sl_mult * atr, price + tp_mult * atr
         return price + sl_mult * atr, price - tp_mult * atr
 
+    def _bot_positions(self):
+        """Return this bot's positions for the trade symbol.
+
+        Positions from manual trading or another EA are never touched. A
+        `None` result is treated as an MT5 query failure, not as "no positions".
+        """
+        positions = mt5.positions_get(symbol=self.symbol)
+        if positions is None:
+            raise RuntimeError(f"positions_get failed: {mt5.last_error()}")
+        return [
+            p for p in positions
+            if int(getattr(p, "magic", -1) or -1) == int(self.magic)
+        ]
+
+    def _close_position(self, position) -> tuple:
+        """Close one bot position and return (ok, reason)."""
+        tick = mt5.symbol_info_tick(self.symbol)
+        if tick is None:
+            return False, "no tick available while closing position"
+
+        pos_type = getattr(position, "type", None)
+        is_buy = pos_type == mt5.POSITION_TYPE_BUY
+        close_type = mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY
+        price = tick.bid if is_buy else tick.ask
+        volume = float(getattr(position, "volume", 0.0) or 0.0)
+        ticket = getattr(position, "ticket", None)
+        if not ticket or volume <= 0 or not price:
+            return False, "invalid position ticket, volume or price"
+
+        info = mt5.symbol_info(self.symbol)
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": self.symbol,
+            "volume": volume,
+            "type": close_type,
+            "position": int(ticket),
+            "price": price,
+            "deviation": 20,
+            "magic": self.magic,
+            "comment": "gold-trading-bot close",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": self._select_filling_mode(info) if info else
+                            getattr(mt5, "ORDER_FILLING_IOC", 1),
+        }
+        result = mt5.order_send(request)
+        done = getattr(mt5, "TRADE_RETCODE_DONE", 10009)
+        partial = getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)
+        if result is None or getattr(result, "retcode", None) not in (done, partial):
+            return False, f"close retcode={getattr(result, 'retcode', None)}"
+        logger.info("STEP 4: closed bot position ticket=%s volume=%.2f",
+                    ticket, volume)
+        return True, "closed"
+
+    @staticmethod
+    def _volume_digits(step: float) -> int:
+        if step <= 0:
+            return 2
+        text = f"{step:.10f}".rstrip("0")
+        return len(text.split(".", 1)[1]) if "." in text else 0
+
+    def _normalize_volume(self, volume: float, info) -> float:
+        """Clamp and round volume to this broker's min/step/max rules."""
+        minimum = float(getattr(info, "volume_min", 0.01) or 0.01)
+        maximum = float(getattr(info, "volume_max", config.MAX_LOT_SIZE) or
+                        config.MAX_LOT_SIZE)
+        step = float(getattr(info, "volume_step", 0.01) or 0.01)
+        volume = max(minimum, min(float(volume), maximum))
+        if step > 0:
+            volume = minimum + math.floor((volume - minimum + 1e-12) / step) * step
+        return round(max(minimum, min(volume, maximum)), self._volume_digits(step))
+
+    def _validate_stops(self, action: str, price: float, sl: float,
+                        tp: float, info) -> Optional[str]:
+        """Validate SL/TP against broker stops level; return an error reason."""
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        stops_level = float(getattr(info, "trade_stops_level", 0.0) or 0.0)
+        minimum_distance = point * stops_level
+        if minimum_distance <= 0:
+            return None
+        if action == "BUY":
+            valid = price - sl >= minimum_distance and tp - price >= minimum_distance
+        else:
+            valid = sl - price >= minimum_distance and price - tp >= minimum_distance
+        if not valid:
+            return (f"SL/TP too close for broker stops level: need "
+                    f"{minimum_distance:.{getattr(info, 'digits', 2)}f}")
+        return None
+
+    @staticmethod
+    def _select_filling_mode(info) -> int:
+        """Choose an MT5 filling mode supported by the broker symbol."""
+        raw = int(getattr(info, "filling_mode", 0) or 0)
+        # SYMBOL_FILLING flags: FOK=1, IOC=2. ORDER_FILLING values are
+        # FOK=0, IOC=1, RETURN=2.
+        if raw & 2:
+            return getattr(mt5, "ORDER_FILLING_IOC", 1)
+        if raw & 1:
+            return getattr(mt5, "ORDER_FILLING_FOK", 0)
+        return getattr(mt5, "ORDER_FILLING_RETURN", 2)
+
     def _place_order(self, action: str, snapshot,
                      news_state: str) -> ExecutionResult:
         """Send a market order with SL/TP. (Runs only when MT5 is available.)"""
@@ -203,6 +304,38 @@ class MT5Executor:
 
         is_buy = action == "BUY"
         price = tick.ask if is_buy else tick.bid  # CFD price from MT5
+        info = mt5.symbol_info(self.symbol)
+        if info is None:
+            return ExecutionResult(status="ERROR", reason="symbol info unavailable",
+                                   symbol=self.symbol, price=price, timestamp=now)
+
+        # Position ownership: same direction is idempotent; opposite bot
+        # positions are closed before the new direction is opened. Positions
+        # with another magic number (including manual trades) are untouched.
+        try:
+            bot_positions = self._bot_positions()
+        except Exception as exc:
+            logger.error("STEP 4: position query failed: %s", exc)
+            return ExecutionResult(status="ERROR", reason=str(exc),
+                                   symbol=self.symbol, price=price, timestamp=now)
+        wanted_type = mt5.POSITION_TYPE_BUY if is_buy else mt5.POSITION_TYPE_SELL
+        opposite = [p for p in bot_positions
+                    if getattr(p, "type", None) != wanted_type]
+        same = [p for p in bot_positions
+                if getattr(p, "type", None) == wanted_type]
+        if same:
+            logger.info("STEP 4: SKIPPED — bot already has %s position(s).", action)
+            return ExecutionResult(
+                status="SKIPPED", reason=f"bot already has {action} position",
+                symbol=self.symbol,
+                volume=float(getattr(same[0], "volume", 0.0) or 0.0),
+                price=price, timestamp=now)
+        for position in opposite:
+            ok, reason = self._close_position(position)
+            if not ok:
+                logger.error("STEP 4: could not close opposite position: %s", reason)
+                return ExecutionResult(status="ERROR", reason=f"close failed: {reason}",
+                                       symbol=self.symbol, price=price, timestamp=now)
 
         # futures <-> CFD basis check (warns if the two markets dislocate)
         try:
@@ -222,6 +355,12 @@ class MT5Executor:
         src_price = getattr(snapshot, "price", 0.0) or price
         atr = src_atr * (price / src_price) if src_price > 0 else src_atr
         sl, tp = self._calc_sl_tp(action, price, atr, news_state)
+        stop_error = self._validate_stops(action, price, sl, tp, info)
+        if stop_error:
+            logger.error("STEP 4: %s", stop_error)
+            return ExecutionResult(status="ERROR", reason=stop_error,
+                                   symbol=self.symbol, price=price, sl=sl,
+                                   tp=tp, timestamp=now)
 
         # --- position sizing ----------------------------------------------------
         equity = self._account_equity()
@@ -230,7 +369,7 @@ class MT5Executor:
             if equity else config.LOT_SIZE
         if news_state == "WARNING":
             lot_size = lot_size * config.NEWS_REDUCE_SIZE_PCT  # shrink during news
-        lot_size = float(np_round2(lot_size))
+        lot_size = self._normalize_volume(lot_size, info)
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -244,7 +383,7 @@ class MT5Executor:
             "magic": self.magic,
             "comment": "gold-trading-bot",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._select_filling_mode(info),
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:

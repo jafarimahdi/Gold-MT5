@@ -13,6 +13,7 @@ Usage:  python3 test_data_providers.py
 
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -20,13 +21,30 @@ from data_providers import (
     DemoProvider, RithmicProvider, DatabentoProvider, get_provider,
     ProviderNotAvailable, trades_to_candles,
     databento_mbo_row_to_event, databento_mbo_row_to_tick,
-    databento_mbp10_row_to_depths,
+    databento_mbp10_row_to_depths, mt5_book_to_depths,
 )
 from step2_market_analysis import analyze_market
 from mt5_signal_bridge import build_signal, signal_to_text, parse_signal
 
 PASS, FAIL = [], []
 check = lambda name, cond: (PASS if cond else FAIL).append(name)
+
+
+def test_mt5_book_types():
+    """MT5 real BookInfo type 1/2 values must map to asks/bids correctly."""
+    class FakeMT5:
+        BOOK_TYPE_SELL = 1
+        BOOK_TYPE_BUY = 2
+
+    book = [
+        SimpleNamespace(type=1, price=2000.5, volume=10),  # sell/ask
+        SimpleNamespace(type=2, price=2000.0, volume=12),  # buy/bid
+        SimpleNamespace(type=1, price=2000.6, volume=8),
+        SimpleNamespace(type=2, price=1999.9, volume=9),
+    ]
+    bids, asks = mt5_book_to_depths(book, FakeMT5)
+    check("MT5 type 2 maps to bid", bids == {2000.0: 12.0, 1999.9: 9.0})
+    check("MT5 type 1 maps to ask", asks == {2000.5: 10.0, 2000.6: 8.0})
 
 
 def test_factory():
@@ -169,6 +187,7 @@ def test_signal_bridge():
 
 
 def main():
+    test_mt5_book_types()
     test_factory()
     test_databento_mappers()
     test_rithmic_l2_l3_flow()

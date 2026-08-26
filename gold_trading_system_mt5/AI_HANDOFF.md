@@ -2,10 +2,10 @@
 
 **Purpose:** This file is the durable project handoff for future development. Any new developer or AI assistant should read this file before changing the application.
 
-**Last updated:** 2026-08-24  
-**Repository:** https://github.com/jafarimahdi/Gold-MT5  
-**Branch reviewed:** `main`  
-**Commit reviewed:** `5e718a3` (`upload app`)  
+**Last updated:** 2026-08-26
+**Repository:** https://github.com/jafarimahdi/Gold-MT5
+**Branch reviewed:** `main`
+**Commit reviewed:** `5e718a3` (`upload app`)
 **Application directory:** `gold_trading_system_mt5/`
 
 > Keep this file inside the application folder and update it after every meaningful version improvement. Never put real API keys, passwords, tokens, private certificates, or the real `.env` file in this document.
@@ -433,39 +433,69 @@ Completed in the owner's Git working copy:
 - `.gitignore` expanded for secrets, environments, caches, logs and generated data;
 - temporary patch files removed from the repository.
 
-The next cleanup step is to review/stage only the intended source, documentation and `.gitignore` changes, then commit them. Do not use `git add .` until the staged file list has been checked because the local virtual environment and runtime files remain on disk.
+Repository cleanup preparation was completed for the previous version: generated files were removed from Git tracking and retained locally. Future commits must still stage only intended source/documentation files and must not use `git add .` when runtime files are present.
 
-### Owner's current Windows operating context — 2026-08-24
+### Version 0.4.5 — Pepperstone-ready Python execution foundation — 2026-08-26
 
-The owner confirmed that the GitHub working copy is on drive `A:` and is the same application version being run locally. The application is launched by clicking:
+A single downloadable source package is being prepared for the owner's new Pepperstone MT5 demo account. The package does not contain the private `.env`, virtual environment, runtime data or logs. It keeps the futures/Rithmic/Databento providers and adds a read-only Pepperstone broker diagnostic.
+
+Implemented in the development workspace:
+
+- Python position management: same-direction idempotence, opposite bot-position close/reverse, manual-position protection;
+- broker-aware volume normalization and stop-distance validation;
+- broker-supported filling-mode selection;
+- optional explicit `MT5_TERMINAL_PATH` for multiple MT5 installations;
+- clearer MT5 symbol-selection errors;
+- `BROKER_NAME` and signal-age configuration;
+- signal expiry field and MQL5 EA stale-signal rejection;
+- supported `google-genai` SDK preferred, with temporary legacy fallback;
+- immediate Gemini key failover preserved;
+- one-command safe local test runner;
+- Pepperstone setup guide and cTrader investigation guide;
+- README, version note and handoff updates.
+
+The owner's selected first execution path is Python-only. EA support remains available but should be inactive while Python execution is tested. Pepperstone uses the exact symbol `XAUUSD`; the package includes the explicit terminal path and a read-only broker diagnostic. No broker credentials are included in the package.
+
+Workspace validation for this foundation: all 9 local test files passed, including `test_python_execution.py` 16/16, `test_markets.py` 29/29, `test_key_rotation.py` 9/9, `test_session_risk.py` 25/25, and `e2e_test.py` 32/32. MQL5 compilation and Pepperstone live order behavior remain Windows-side checks.
+
+### Owner's current Windows operating context — updated 2026-08-26
+
+The owner has migrated the demo test from Vantage to Pepperstone. The GitHub working copy is on drive `A:` and the application is run from:
 
 ```text
-A:\gitHub\Gold-MT5\gold_trading_system_mt5\start_bot.bat
+A:\gitHub\Gold-MT5\gold_trading_system_mt5
 ```
 
-The batch file changes into the application directory, starts/uses the local Python virtual environment, launches the continuous `main.py --loop`, and the MT5 terminal is available to the provider. The current broker is Vantage and the account is demo.
+The Pepperstone MT5 executable is:
 
-The owner wants to:
+```text
+C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe
+```
 
-- continue using the current Vantage MT5 CFD for demo testing;
-- keep the futures/Rithmic/Databento capabilities in the code for future testing;
-- potentially support both MT5 and futures data in a future data-fusion design;
-- consider Pepperstone or Interactive Brokers later, with the broker choice not yet final;
-- keep automatic demo trading possible, but the execution path (Python versus EA) is not yet selected.
+The active Pepperstone symbol is:
 
-Important architecture clarification: the current code supports ONE configured `DATA_SOURCE` per run. It can use futures data for analysis and MT5 for execution, but it does not currently combine MT5 and futures feeds simultaneously. Combining both feeds requires a new data-fusion layer with timestamp alignment, source priority and conflict handling.
+```text
+XAUUSD
+```
 
-The owner also uses `start_report.bat`. It calls `robot_report.py`, reads the decision/trade CSV files and logs, and generates `data/robot_report.html`. It is a reporting tool; it does not place trades. The current report data must not be trusted until the repeated closed-deal logging bug is fixed.
+The Pepperstone demo account reports company `Pepperstone Limited` and server `PepperstoneUK-Demo`. The broker diagnostic found live bid/ask data, 10 Level 2 book levels for XAUUSD, minimum/step volume `0.01`, maximum volume `50.0`, stop/freeze levels `0`, and filling mode `2`.
 
-### Known test inconsistencies
+The owner's selected first execution test is Python-only, with both execution modes preserved in the package. The safe local settings are:
 
-`test_markets.py` returned `27/28`.
+```env
+EXECUTION_MODE=none
+TRADING_ENABLED=0
+```
 
-The failed check expects `DATA_SYMBOL=XAUUSD`, while the current configuration defaults to `GC` for the futures/data design. For `DATA_SOURCE=mt5`, the provider actually uses `MT5_SYMBOL`. The test and configuration need to be made consistent.
+After diagnostics and supervised tests, Python mode may be selected. The EA remains available but must not run as a second active executor.
 
-`e2e_test.py` returned `30/31`.
+The owner wants to preserve Rithmic/Databento futures functionality and investigate cTrader only if needed after the Pepperstone MT5 test. The current code supports one primary `DATA_SOURCE` per run; simultaneous MT5/futures data fusion remains a future feature.
 
-The failed check expects `main.py` to report `mt5`, but no real `.env` exists in the repository and the code therefore falls back to `DATA_SOURCE=demo`. The test should explicitly set its configuration rather than depending on a private `.env` file.
+The owner also uses `start_report.bat`. It calls `robot_report.py`, reads the decision/trade CSV files and logs, and generates `data/robot_report.html`. It is a reporting tool; it does not place trades. New outcome logging is deduplicated, but old local report rows must be reviewed before trusting historical statistics.
+
+### Historical test inconsistencies — resolved
+
+Earlier versions had a broker-symbol assertion mismatch (`XAUUSD` versus broker suffixes) and an environment-dependent end-to-end assertion. These were corrected. The current workspace test suite passes all 9 local test files.
 
 ### Backtest result observed
 
@@ -484,15 +514,12 @@ This is not a real-market evaluation, but it confirms that profitability has not
 
 ### Not yet verified
 
-- real MT5 connection;
-- exact broker symbol behavior for `XAUUSD+`;
-- real MT5 Level 2 data;
-- broker lot-size and stop-distance rules;
-- real order placement;
-- Gemini API responses using the configured models;
-- live news/calendar accuracy;
+- real Pepperstone order placement through Python;
+- broker order acceptance with actual volume/SL/TP requests;
 - MQL5 EA and indicator compilation;
-- duplicate-execution behavior;
+- EA execution, reversal and trailing behavior;
+- simultaneous-feed/data-fusion behavior;
+- cTrader or Interactive Brokers connectivity;
 - slippage and live profitability.
 
 ---
@@ -722,6 +749,10 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 - Confirmed a safe real Gemini call: key #1 was rate-limited, key #2 answered `HOLD @ 75%`, no trade occurred because `TRADING_ENABLED=0`, and the signal bridge wrote `NEUTRAL`.
 - Confirmed the current Gemini SDK is deprecated and should be migrated to `google-genai` before further production work.
 - Implemented and locally verified immediate Gemini key failover with no artificial wait; `test_key_rotation.py` passed 9/9 and the cooldown setting was documented in `.env.example`.
+- Prepared Pepperstone-ready package work: Python position management, broker diagnostics, explicit terminal path, modern Gemini support, signal expiry and portable documentation.
+- Fixed MT5 market-book type mapping after Pepperstone diagnostic: MT5 type 1 is sell/ask and type 2 is buy/bid; the prior provider incorrectly treated type 0/other as the bid/ask split.
+- Confirmed Pepperstone MT5 XAUUSD provides 10 Level 2 book levels during diagnostic testing.
+- Corrected MT5 BookInfo mapping in the provider and read-only test: `type=2` is a buy/bid entry and `type=1` is a sell/ask entry. Added retries after book subscription so a populated Level 2 book is not falsely reported as empty. Local test suite remained fully green.
 
 ---
 

@@ -30,7 +30,7 @@ if not exist "venv\Scripts\activate.bat" (
 call venv\Scripts\activate.bat
 
 REM ---- 5) install the required packages on first run ----
-python -c "import pandas" >nul 2>nul
+python -c "import pandas, MetaTrader5; from google import genai" >nul 2>nul
 if errorlevel 1 (
     echo  [SETUP] Installing required packages - once - a few minutes.
     pip install -r requirements.txt

@@ -43,19 +43,27 @@ gold_trading_system/
 ├── data_providers.py            # demo / Rithmic / Databento / replay adapters
 ├── step2_market_analysis.py     # ⭐ ALL analysis tools (complete & tested)
 ├── step3_ai_decision.py         # Gemini AI integration
-├── step4_mt5_execution.py       # MetaTrader 5 execution (Python SDK path)
+├── step4_mt5_execution.py       # Python execution + position management
 ├── step5_monitoring.py          # trade management & monitoring
 ├── mt5_signal_bridge.py         # writes the signal file the EA/indicator read
+├── broker_diagnostic.py          # read-only broker/symbol/Level 2 diagnostic
+├── test_python_execution.py      # safe Python open/close/reverse tests
+├── PEPPERSTONE_SETUP.md          # Pepperstone MT5 setup and validation
+├── CTRADER_NEXT.md               # cTrader investigation plan (not active yet)
 ├── mt5_ea/
 │   ├── GoldTradingEA.mq5        # MT5 Expert Advisor (auto-trade from signal)
 │   └── GoldSignalIndicator.mq5  # MT5 indicator (draws the signal)
 ├── paper_trade_checklist.md     # go-live checklist (follow this!)
 ├── demo_step2.py                # Step 2 unit tests (36 checks) + demo
-├── test_data_providers.py       # provider->Step2 compatibility tests (27 checks)
+├── test_data_providers.py      # provider->Step2 compatibility tests (29 checks)
 ├── test_markets.py              # market/symbol layer tests (28 checks)
 ├── test_indicators_golden.py    # indicator golden tests (19 checks)
 ├── test_session_risk.py         # weekend/no-data/risk resilience (25 checks)
-├── e2e_test.py                  # full pipeline integration tests (31 checks)
+├── test_key_rotation.py         # safe multi-key fallback (9 checks)
+├── test_news.py                 # news caching/enrichment tests (11 checks)
+├── test_python_execution.py     # Python execution/position tests (15 checks)
+├── run_all_tests.py             # one command for all safe local tests
+├── e2e_test.py                  # full pipeline integration tests
 ├── logs/                        # error/run logs
 └── data/                        # outputs (snapshot, decisions, outcomes, ...)
 ```
@@ -64,36 +72,52 @@ gold_trading_system/
 
 | Step | Module | Status |
 |------|--------|--------|
-| 0 | `config.py` | ✅ Done (settings, .env loading, thresholds, news windows) |
-| 1 | `step1_data_acquisition.py` | 🟡 Scaffold — demo data works; Databento/Rithmic stubbed |
-| 2 | `step2_market_analysis.py` | ✅ **Complete** — 25+ signals incl. L2/L3 depth + news-time, 36/36 checks |
-| 3 | `step3_ai_decision.py` | 🟡 Scaffold — full Gemini call implemented, needs `GEMINI_API_KEY` |
-| 4 | `step4_mt5_execution.py` | ✅ News gates + risk sizing + SL/TP; needs MT5 to place real orders |
-| 5 | `step5_monitoring.py` | 🟡 Scaffold — monitoring + loop implemented, needs MT5 |
+| 0 | `config.py` | ✅ Settings, broker/terminal path, execution mode and safety thresholds |
+| 1 | `step1_data_acquisition.py` | ✅ MT5 provider; futures adapters retained; broker diagnostic included |
+| 2 | `step2_market_analysis.py` | ✅ 25+ signals incl. technicals, order flow, news-time and macro data |
+| 3 | `step3_ai_decision.py` | ✅ Gemini with modern SDK preferred, legacy fallback, immediate key failover |
+| 4 | `step4_mt5_execution.py` | ✅ Python position management, broker volume/stops checks, EA routing |
+| 5 | `step5_monitoring.py` | ✅ Monitoring, closed-deal IDs and continuous loop; live EA still requires Windows verification |
 
-## Quick start
+## Quick start (Windows)
 
-```bash
-cd gold_trading_system
-pip install -r requirements.txt
+Run from the directory containing `main.py`:
 
-# run the full pipeline once (uses synthetic demo data)
-python3 main.py
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 
-# run continuously (Step 5 loop)
-python3 main.py --loop
+# safe first run — no orders
+# set TRADING_ENABLED=0 and EXECUTION_MODE=none in .env
+python main.py
+
+# read-only broker/symbol/Level 2 check
+python broker_diagnostic.py
+python mt5_test.py
+
+# continuous loop
+python main.py --loop
 
 # backtest the signal engine on history
-python3 backtest.py
-
-# run all test suites
-python3 demo_step2.py               # Step 2 (36 checks)
-python3 test_data_providers.py      # provider compatibility (27)
-python3 test_markets.py             # market/symbol layer (28)
-python3 test_indicators_golden.py   # indicator correctness (19)
-python3 test_session_risk.py        # weekend/no-data/risk (25)
-python3 e2e_test.py                 # full pipeline (31)
+python backtest.py
 ```
+
+Run the test suites:
+
+```powershell
+python demo_step2.py
+python test_data_providers.py
+python test_markets.py
+python test_indicators_golden.py
+python test_session_risk.py
+python test_key_rotation.py
+python test_news.py
+python test_python_execution.py
+python e2e_test.py
+```
+
+For a Pepperstone setup, read `PEPPERSTONE_SETUP.md` before changing broker settings.
 
 ## Safety nets (weekend / no-data / risk)
 

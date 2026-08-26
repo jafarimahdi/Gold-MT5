@@ -11,19 +11,18 @@ venv/
 __pycache__/
 *.py[cod]
 
-# Runtime logs
+# Runtime logs and generated data at any depth
 **/logs/*.log
-
-# Generated runtime data
 **/data/*.json
 **/data/*.csv
 **/data/*.lock
 **/data/*.txt
 **/data/*.html
-
-# Keep empty-folder placeholders
 !**/data/.gitkeep
 !**/logs/.gitkeep
+
+# Local transfer files
+*.patch
 
 # Operating-system files
 .DS_Store

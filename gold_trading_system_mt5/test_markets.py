@@ -79,6 +79,8 @@ def test_signal_bridge_pct():
     sl_pct = float(parsed["sl_pct"])
     tp_pct = float(parsed["tp_pct"])
     check("signal has sl_pct and tp_pct", sl_pct > 0 and tp_pct > sl_pct)
+    check("signal expiry is after signal id",
+          int(parsed["expires_unix"]) > int(parsed["id"]))
     check("signal trade symbol is XAUUSD (CFD)",
           parsed["trade_symbol"] == "XAUUSD" or parsed["symbol"] == "XAUUSD")
 

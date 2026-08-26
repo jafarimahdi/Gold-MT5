@@ -3,8 +3,26 @@
 This document lists every change made to improve the accuracy of the gold
 market analysis and the behaviour of the robot around news events.
 
-All changes verified: **36/36** Step-2 unit checks and **31/31** end-to-end
-integration checks pass.
+All changes verified: the current foundation test suite runs through
+`run_all_tests.py` with all 9 local test files passing in the development
+workspace. Live broker and MQL5 checks remain Windows-side tests.
+
+---
+
+## 0. Version 0.4.5 — Pepperstone-ready Python execution foundation
+
+- Added Python position management: duplicate same-direction protection,
+  close-opposite-and-reverse behavior, and manual-position protection.
+- Added broker volume-step normalization, stop-distance validation and filling
+  mode selection.
+- Added `BROKER_NAME`, optional `MT5_TERMINAL_PATH` and signal expiry settings.
+- Added read-only `broker_diagnostic.py` for symbol, broker rules and Level 2.
+- Added `test_python_execution.py` and `run_all_tests.py`.
+- Preferred the supported `google-genai` SDK while keeping a temporary legacy
+  fallback for existing installations.
+- Added Pepperstone and cTrader setup documentation.
+- Preserved futures/Rithmic/Databento providers; cTrader, IB and simultaneous
+  MT5/futures fusion remain future integrations.
 
 ---
 

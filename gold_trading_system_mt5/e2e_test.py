@@ -22,27 +22,30 @@ from types import SimpleNamespace
 # Install mocks BEFORE importing the steps (they capture imports at load time)
 # --------------------------------------------------------------------------- #
 
-# --- mock google.generativeai ------------------------------------------------
+# --- mock google-genai ------------------------------------------------------
 fake_google = types.ModuleType("google")
-fake_genai = types.ModuleType("google.generativeai")
+fake_genai = types.ModuleType("google.genai")
 
 
 class _FakeResponse:
     text = '{"action": "BUY", "confidence": 85, "rationale": "strong uptrend"}'
 
 
-class _FakeModel:
-    def __init__(self, name):
-        self.name = name
-
-    def generate_content(self, prompt):
+class _FakeModels:
+    def generate_content(self, model, contents):
         return _FakeResponse()
 
 
-fake_genai.GenerativeModel = _FakeModel
-fake_genai.configure = lambda **kw: None
+class _FakeClient:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.models = _FakeModels()
+
+
+fake_genai.Client = _FakeClient
+fake_google.genai = fake_genai
 sys.modules["google"] = fake_google
-sys.modules["google.generativeai"] = fake_genai
+sys.modules["google.genai"] = fake_genai
 
 # --- mock MetaTrader5 --------------------------------------------------------
 fake_mt5 = types.ModuleType("MetaTrader5")
@@ -56,7 +59,9 @@ fake_mt5.POSITION_TYPE_SELL = 1
 fake_mt5.TRADE_RETCODE_DONE = 10009
 
 
-def _initialize():
+def _initialize(*args, **kwargs):
+    # The real provider may pass an explicit terminal path. Accept it in the
+    # fake so this test remains independent of the user's broker .env.
     return True
 
 
@@ -76,10 +81,18 @@ def _order_send(request):
     return SimpleNamespace(retcode=10009, order=123456)
 
 
-def _positions_get():
-    return [SimpleNamespace(ticket=999, symbol="XAUUSD", type=0, volume=0.1,
-                            price_open=2020.0, sl=2010.0, tp=2050.0,
-                            profit=12.5)]
+fake_positions = []
+
+
+def _positions_get(symbol=None):
+    return list(fake_positions)
+
+
+def _symbol_info(symbol):
+    return SimpleNamespace(
+        name=symbol, point=0.01, digits=2,
+        volume_min=0.01, volume_max=100.0, volume_step=0.01,
+        trade_stops_level=0, trade_freeze_level=0, filling_mode=2)
 
 
 # ---- data-provider functions (used when DATA_SOURCE=mt5 in Step 1) ----------
@@ -128,6 +141,7 @@ def _copy_rates_from_pos(symbol, timeframe, start_pos, count):
 fake_mt5.initialize = _initialize
 fake_mt5.shutdown = _shutdown
 fake_mt5.symbol_info_tick = _symbol_info_tick
+fake_mt5.symbol_info = _symbol_info
 fake_mt5.account_info = _account_info
 fake_mt5.order_send = _order_send
 fake_mt5.positions_get = _positions_get
@@ -154,12 +168,11 @@ config.AI_CONFIDENCE_THRESHOLD = 70.0
 # This test installs fake Gemini and fake MT5 modules before importing the
 # pipeline. It is therefore safe to enable the execution gate for the mock
 # order assertions, even when the user's real .env has trading disabled.
-
 config.TRADING_ENABLED = True
-# Direct order assertions in this test use the Python execution path.
+# The direct order assertions in this test represent Python execution mode.
 config.EXECUTION_MODE = "python"
-from step1_data_acquisition import DataAcquisition
 
+from step1_data_acquisition import DataAcquisition
 from step2_market_analysis import analyze_market, _synthetic_market_data
 from step3_ai_decision import AIDecisionEngine, Decision
 from step4_mt5_execution import MT5Executor
@@ -232,7 +245,17 @@ def main():
     check("SIZING: risk-based lots in (0, MAX]",
           0.0 < r_quiet.volume <= config.MAX_LOT_SIZE)
 
+    # ---- execution ownership: EA mode must block Python order placement ----
+    config.EXECUTION_MODE = "ea"
+    ea_block = MT5Executor().execute(Decision("BUY", 95.0, "EA path"), snap)
+    check("EA mode blocks Python executor", ea_block.status == "SKIPPED")
+    config.EXECUTION_MODE = "python"
+
     # ---- STEP 5 (mock MT5 -> one open position) --------------------------
+    fake_positions[:] = [SimpleNamespace(ticket=999, symbol="XAUUSD", type=0,
+                                         volume=0.1, magic=999001,
+                                         price_open=2020.0, sl=2010.0,
+                                         tp=2050.0, profit=12.5)]
     tm = TradeMonitor(poll_seconds=0)
     positions = tm.check_open_trades()
     check("STEP5: found 1 open position", len(positions) == 1)

@@ -39,7 +39,7 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_FIELDS = ["id", "timestamp", "symbol", "direction", "confidence", "strength",
+_FIELDS = ["id", "timestamp", "expires_unix", "symbol", "direction", "confidence", "strength",
            "price", "sl", "tp", "sl_pct", "tp_pct", "lots", "news_state",
            "data_symbol", "trade_symbol"]
 
@@ -96,12 +96,17 @@ def build_signal(snapshot, decision) -> Dict[str, Any]:
         sl = tp = 0.0
 
     lots = risk_based_lots(snapshot) if direction != "NEUTRAL" else 0.0
+    signal_ts = getattr(snapshot, "timestamp", datetime.now(timezone.utc))
+    if signal_ts.tzinfo is None:
+        signal_ts = signal_ts.replace(tzinfo=timezone.utc)
+    signal_id = int(signal_ts.timestamp())
+    expires_unix = signal_id + max(0, int(getattr(
+        config, "SIGNAL_MAX_AGE_SECONDS", 180)))
 
     return {
-        "id": int(getattr(snapshot, "timestamp", datetime.now(timezone.utc))
-                  .timestamp()),
-        "timestamp": getattr(snapshot, "timestamp",
-                             datetime.now(timezone.utc)).isoformat(),
+        "id": signal_id,
+        "timestamp": signal_ts.isoformat(),
+        "expires_unix": expires_unix,
         "symbol": getattr(snapshot, "trade_symbol", "") or
                   getattr(snapshot, "symbol", config.MT5_SYMBOL) or config.MT5_SYMBOL,
         "direction": direction,

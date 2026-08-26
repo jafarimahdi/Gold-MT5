@@ -175,6 +175,19 @@ void ProcessSignalFile()
    datetime sigId = (datetime)StringToInteger(s);
    if(sigId <= g_lastSignalId)
       return;                          // already acted on this signal
+
+   // Never act on a signal left behind by a stopped/restarted Python process.
+   string expiry;
+   if(GetValue(content, "expires_unix", expiry))
+     {
+      long expiresAt = (long)StringToInteger(expiry);
+      if(expiresAt > 0 && (long)TimeCurrent() > expiresAt)
+        {
+         g_lastSignalId = sigId;
+         Print("GoldTradingEA: expired signal ignored (id=", sigId, ")");
+         return;
+        }
+     }
    g_lastSignalId = sigId;
 
    if(!GetValue(content, "direction", s))
