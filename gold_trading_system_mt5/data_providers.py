@@ -228,6 +228,12 @@ class BaseProvider:
             # feed health (no-data / weekend resilience)
             "has_data": has_data,
             "last_data_age_seconds": self.data_age_seconds(),
+            "data_quality": {
+                "level2": "available" if bid and ask else "unavailable",
+                "level3": "available" if self.order_events else "unavailable",
+                "trade_prints": "available" if self._trades else "unavailable",
+                "order_flow": "provider_ticks" if self._trades else "unavailable",
+            },
         }
 
     def _best_prices(self) -> Tuple[float, float]:
@@ -726,6 +732,7 @@ class MT5Provider(BaseProvider):
             time.sleep(0.5)
 
         # ---- 3) ticks (last ~30 min, with aggressor side) ---------------
+        real_trade_ticks = 0
         try:
             since = datetime.now(timezone.utc).replace(tzinfo=None) - \
                 timedelta(minutes=30)
@@ -746,6 +753,7 @@ class MT5Provider(BaseProvider):
                         else:
                             side = ""              # tick rule will infer
                         self.handle_trade(last, vol, side)
+                        real_trade_ticks += 1
                     except (KeyError, TypeError, ValueError):
                         continue
         except Exception as exc:
@@ -830,6 +838,14 @@ class MT5Provider(BaseProvider):
         data["candles_m15"] = candles_m15
         data["candles_h1"] = candles_h1
         data["spread_pct"] = spread_pct
+        has_l2 = bool(data.get("bid_depth") and data.get("ask_depth"))
+        data["data_quality"] = {
+            "level2": "live" if has_l2 else "unavailable",
+            "level3": "unavailable",
+            "trade_prints": "live" if real_trade_ticks else "unavailable",
+            "order_flow": ("real_trade_ticks" if real_trade_ticks
+                            else "estimated_from_candle_direction"),
+        }
         # ---- 7) CFD feeds have no order book -> use the live tick price ----
         # Without this, price/bid/ask would be 0 (the order book is empty) and
         # every price-vs-SMA/VWAP signal would be wrong.

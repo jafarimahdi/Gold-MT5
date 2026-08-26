@@ -47,21 +47,23 @@ gold_trading_system/
 ├── step5_monitoring.py          # trade management & monitoring
 ├── mt5_signal_bridge.py         # writes the signal file the EA/indicator read
 ├── broker_diagnostic.py          # read-only broker/symbol/Level 2 diagnostic
+├── demo_order_test.py            # explicit supervised demo open/close test
 ├── test_python_execution.py      # safe Python open/close/reverse tests
 ├── PEPPERSTONE_SETUP.md          # Pepperstone MT5 setup and validation
-├── CTRADER_NEXT.md               # cTrader investigation plan (not active yet)
 ├── mt5_ea/
 │   ├── GoldTradingEA.mq5        # MT5 Expert Advisor (auto-trade from signal)
 │   └── GoldSignalIndicator.mq5  # MT5 indicator (draws the signal)
 ├── paper_trade_checklist.md     # go-live checklist (follow this!)
 ├── demo_step2.py                # Step 2 unit tests (36 checks) + demo
-├── test_data_providers.py      # provider->Step2 compatibility tests (29 checks)
-├── test_markets.py              # market/symbol layer tests (28 checks)
+├── test_data_providers.py      # provider->Step2 compatibility tests (31 checks)
+├── test_markets.py              # market/symbol layer tests (29 checks)
 ├── test_indicators_golden.py    # indicator golden tests (19 checks)
 ├── test_session_risk.py         # weekend/no-data/risk resilience (25 checks)
 ├── test_key_rotation.py         # safe multi-key fallback (9 checks)
 ├── test_news.py                 # news caching/enrichment tests (11 checks)
-├── test_python_execution.py     # Python execution/position tests (15 checks)
+├── test_python_execution.py     # Python execution/position tests (16 checks)
+├── test_reports.py              # report de-duplication test
+├── deduplicate_trade_outcomes.py # inspect/clean old duplicate outcomes
 ├── run_all_tests.py             # one command for all safe local tests
 ├── e2e_test.py                  # full pipeline integration tests
 ├── logs/                        # error/run logs
@@ -114,7 +116,11 @@ python test_session_risk.py
 python test_key_rotation.py
 python test_news.py
 python test_python_execution.py
+python test_reports.py
 python e2e_test.py
+
+# Explicit demo broker plumbing test (ONLY with confirmation, not a strategy test)
+# python demo_order_test.py --side BUY --confirm-demo-order
 ```
 
 For a Pepperstone setup, read `PEPPERSTONE_SETUP.md` before changing broker settings.

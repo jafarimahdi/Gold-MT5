@@ -435,7 +435,7 @@ Completed in the owner's Git working copy:
 
 Repository cleanup preparation was completed for the previous version: generated files were removed from Git tracking and retained locally. Future commits must still stage only intended source/documentation files and must not use `git add .` when runtime files are present.
 
-### Version 0.4.7 — Pepperstone-ready Python execution foundation — 2026-08-26
+### Version 0.6.0 — Pepperstone-ready Python execution foundation — 2026-08-26
 
 A single downloadable source package is being prepared for the owner's new Pepperstone MT5 demo account. The package does not contain the private `.env`, virtual environment, runtime data or logs. It keeps the futures/Rithmic/Databento providers and adds a read-only Pepperstone broker diagnostic.
 
@@ -452,13 +452,17 @@ Implemented in the development workspace:
 - configurable modern Gemini request timeout and unused AFC disabled;
 - immediate Gemini key failover preserved;
 - end-to-end test risk settings isolated from the user's personal `.env`, so the warning-mode sizing assertion remains valid when live demo settings cap `MAX_LOT_SIZE=0.01`;
+- added `deduplicate_trade_outcomes.py` and report-level de-duplication so old repeated rows do not inflate statistics;
+- added snapshot `data_quality` labels for live Level 2, live trade prints, estimated candle flow and unavailable Level 3;
 - one-command safe local test runner;
-- Pepperstone setup guide and cTrader investigation guide;
+- explicit supervised `demo_order_test.py` for broker order plumbing (never a strategy test);
+- report de-duplication utility and test;
+- Pepperstone setup guide;
 - README, version note and handoff updates.
 
 The owner's selected first execution path is Python-only. EA support remains available but should be inactive while Python execution is tested. Pepperstone uses the exact symbol `XAUUSD`; the package includes the explicit terminal path and a read-only broker diagnostic. No broker credentials are included in the package.
 
-Workspace validation for this foundation: all 9 local test files passed, including `test_python_execution.py` 16/16, `test_markets.py` 29/29, `test_key_rotation.py` 9/9, `test_session_risk.py` 25/25, and `e2e_test.py` 32/32. MQL5 compilation and Pepperstone live order behavior remain Windows-side checks.
+Workspace validation for this foundation: all 10 local test files passed, including `test_python_execution.py` 16/16, `test_markets.py` 29/29, `test_key_rotation.py` 9/9, `test_session_risk.py` 25/25, and `e2e_test.py` 32/32. MQL5 compilation and Pepperstone live order behavior remain Windows-side checks.
 
 ### Owner's current Windows operating context — updated 2026-08-26
 
@@ -491,7 +495,7 @@ TRADING_ENABLED=0
 
 After diagnostics and supervised tests, Python mode may be selected. The EA remains available but must not run as a second active executor.
 
-The owner wants to preserve Rithmic/Databento futures functionality and investigate cTrader only if needed after the Pepperstone MT5 test. The current code supports one primary `DATA_SOURCE` per run; simultaneous MT5/futures data fusion remains a future feature.
+The owner wants to preserve Rithmic/Databento futures functionality. The current code supports one primary `DATA_SOURCE` per run; simultaneous MT5/futures data fusion remains a future feature. No additional platform integration is included in this release.
 
 The owner also uses `start_report.bat`. It calls `robot_report.py`, reads the decision/trade CSV files and logs, and generates `data/robot_report.html`. It is a reporting tool; it does not place trades. New outcome logging is deduplicated, but old local report rows must be reviewed before trusting historical statistics.
 
@@ -517,11 +521,12 @@ This is not a real-market evaluation, but it confirms that profitability has not
 ### Not yet verified
 
 - real Pepperstone order placement through Python;
+- `demo_order_test.py` supervised open/close run;
 - broker order acceptance with actual volume/SL/TP requests;
 - MQL5 EA and indicator compilation;
 - EA execution, reversal and trailing behavior;
 - simultaneous-feed/data-fusion behavior;
-- cTrader or Interactive Brokers connectivity;
+- other-platform connectivity outside the current MT5/futures providers;
 - slippage and live profitability.
 
 ---
@@ -779,7 +784,7 @@ Current validated facts:
 2. Pepperstone XAUUSD provided 10 Level 2 book levels in the diagnostic and the corrected main provider now maps them to bid/ask correctly.
 3. The local safe test runner passes all 9 test files, including Python execution tests and the end-to-end mock test.
 4. MT5 CFD data has no Level 3 events; quote tick last/volume may be zero, so some CVD/footprint values are estimated.
-5. Real Pepperstone order acceptance, MQL5 compilation, EA behavior, cTrader and Interactive Brokers are not yet verified.
+5. Real Pepperstone order acceptance, MQL5 compilation and EA behavior are not yet verified.
 6. The current modern Gemini client has a configurable request timeout; keep the latest timeout behavior documented by the current source.
 
 First ask me for the latest git commit, the current sanitized `.env` configuration, and the latest safe test output if they are not already available. Preserve and update this handoff after every version improvement. Do not delete or move files without explaining why and asking first.

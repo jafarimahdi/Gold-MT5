@@ -41,7 +41,7 @@ class TradeMonitor:
             logger.info("STEP 5: MetaTrader5 SDK not installed -> no live "
                         "positions to monitor (demo mode).")
             return []
-        if not mt5.initialize():
+        if not config.mt5_initialize(mt5):
             logger.error("STEP 5: mt5.initialize() failed")
             return []
         try:
@@ -71,7 +71,7 @@ class TradeMonitor:
         since = since or datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0)
         try:
-            if not mt5.initialize():
+            if not config.mt5_initialize(mt5):
                 return []
             deals = mt5.history_deals_get(since, datetime.now(timezone.utc))
             mt5.shutdown()

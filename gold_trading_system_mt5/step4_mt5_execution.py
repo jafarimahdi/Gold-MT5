@@ -145,7 +145,7 @@ class MT5Executor:
             return ExecutionResult(status="PENDING",
                                    reason="MetaTrader5 SDK not installed",
                                    symbol=self.symbol, timestamp=now)
-        if not mt5.initialize():
+        if not config.mt5_initialize(mt5):
             logger.error("STEP 4: mt5.initialize() failed: %s", mt5.last_error())
             return ExecutionResult(status="ERROR", reason="MT5 init failed",
                                    symbol=self.symbol, timestamp=now)
@@ -245,6 +245,33 @@ class MT5Executor:
         logger.info("STEP 4: closed bot position ticket=%s volume=%.2f",
                     ticket, volume)
         return True, "closed"
+
+    def close_bot_positions(self) -> list:
+        """Close all positions owned by this bot for the configured symbol.
+
+        This public helper is used by the explicit demo-order plumbing test and
+        by future operator controls. It never closes positions with another
+        magic number.
+        """
+        if mt5 is None:
+            return [{"ok": False, "reason": "MetaTrader5 SDK not installed"}]
+        if not config.mt5_initialize(mt5):
+            return [{"ok": False, "reason": f"MT5 init failed: {mt5.last_error()}"}]
+        results = []
+        try:
+            positions = self._bot_positions()
+            for position in positions:
+                ok, reason = self._close_position(position)
+                results.append({
+                    "ticket": getattr(position, "ticket", None),
+                    "ok": ok,
+                    "reason": reason,
+                })
+            return results
+        except Exception as exc:
+            return [{"ok": False, "reason": str(exc)}]
+        finally:
+            mt5.shutdown()
 
     @staticmethod
     def _volume_digits(step: float) -> int:

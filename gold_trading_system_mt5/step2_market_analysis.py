@@ -240,6 +240,9 @@ class MarketSnapshot:
     data_market: str = ""
     trade_market: str = ""
     notes: List[str] = field(default_factory=list)
+    # Data-quality labels prevent estimated CFD flow from being mistaken for
+    # exchange trade prints or Level 3 data.
+    data_quality: Dict[str, str] = field(default_factory=dict)
 
 
 # ----------------------------------------------------------------------------- #
@@ -1985,7 +1988,8 @@ def analyze_market(market_data: Dict[str, Any],
         trade_symbol=str(market_data.get("trade_symbol") or ""),
         data_market=str(market_data.get("data_market") or ""),
         trade_market=str(market_data.get("trade_market") or ""),
-        notes=notes)
+        notes=notes,
+        data_quality=dict(market_data.get("data_quality") or {}))
 
     logger.info("analyze_market() -> %s (strength=%s, confidence=%s, news=%s)",
                 direction, strength, confidence, news_state)
@@ -2041,18 +2045,26 @@ def format_snapshot(snapshot: MarketSnapshot) -> str:
     of = snapshot.order_flow
     f = snapshot.footprint
     l3 = snapshot.level3
+    data_market = str(snapshot.data_market or "").upper()
+    data_symbol = str(snapshot.data_symbol or "").upper()
+    data_label = "MT5 CFD" if data_market == "XAUUSD" or data_symbol.startswith("XAU") else "futures feed"
+    quality = snapshot.data_quality or {}
 
     lines = [
         "=" * 72,
         f"MARKET SNAPSHOT  {snapshot.symbol}  @ {snapshot.timestamp.isoformat()}",
         "=" * 72,
-        f"DATA (futures feed): {snapshot.data_market or '?'} "
+        f"DATA ({data_label}): {snapshot.data_market or '?'} "
         f"({snapshot.data_symbol or '?'})   ->   "
         f"TRADE (MT5 CFD): {snapshot.trade_market or '?'} "
         f"({snapshot.trade_symbol or '?'})",
         f"Analysis price ({snapshot.data_symbol or 'data'}): {snapshot.price:,.2f}   "
         f"Bid: {snapshot.bid:,.2f}   Ask: {snapshot.ask:,.2f}   "
         f"Volume: {snapshot.volume:,.0f}   Regime: {snapshot.regime}",
+        f"Data quality: L2={quality.get('level2', 'unknown')}   "
+        f"trade prints={quality.get('trade_prints', 'unknown')}   "
+        f"order flow={quality.get('order_flow', 'unknown')}   "
+        f"L3={quality.get('level3', 'unknown')}",
         "",
         "--- TREND ---",
         f"  SMA 9/20/50      : {t.sma_9:,.2f} / {t.sma_20:,.2f} / {t.sma_50:,.2f}",
@@ -2258,6 +2270,12 @@ def _synthetic_market_data(seed: int = 42,
         "data_market": "GC",
         "trade_symbol": "XAUUSD",
         "trade_market": "XAUUSD",
+        "data_quality": {
+            "level2": "synthetic",
+            "level3": "synthetic",
+            "trade_prints": "synthetic",
+            "order_flow": "synthetic",
+        },
     }
 
 

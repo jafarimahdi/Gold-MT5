@@ -290,6 +290,21 @@ def reload_env() -> None:
     _refresh()
 
 
+def mt5_initialize(mt5_module) -> bool:
+    """Initialize the selected MT5 terminal consistently across all modules.
+
+    When several broker terminals are installed, `MT5_TERMINAL_PATH` pins the
+    connection. Login/password/server are used only when `MT5_LOGIN` is nonzero;
+    login=0 means use the already-running selected terminal.
+    """
+    kwargs = {}
+    if MT5_TERMINAL_PATH:
+        kwargs["path"] = MT5_TERMINAL_PATH
+    if MT5_LOGIN:
+        kwargs.update(login=MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER)
+    return bool(mt5_module.initialize(**kwargs))
+
+
 def credentials_configured() -> dict:
     """Return a {service: bool} map of which credentials are present."""
     return {

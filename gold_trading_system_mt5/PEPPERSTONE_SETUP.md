@@ -71,6 +71,38 @@ Expected behavior:
 - the EA signal is neutralised;
 - no order is sent.
 
+## Explicit demo order plumbing test
+
+This verifies broker order acceptance, not the strategy's decision quality. Use
+only a Pepperstone demo account, keep the EA detached/AutoTrading disabled, and
+make sure no XAUUSD position is open.
+
+Set locally:
+
+```env
+EXECUTION_MODE=python
+TRADING_ENABLED=1
+MAX_LOT_SIZE=0.01
+```
+
+Then run exactly one side with explicit confirmation:
+
+```powershell
+python demo_order_test.py --side BUY --confirm-demo-order
+```
+
+The script opens at most the configured maximum volume, waits five seconds and
+attempts to close only the bot-owned position. It does not use Gemini and is
+not a strategy recommendation. If the open request fails, no close is
+attempted. If interrupted after opening, close the bot position manually in
+MT5.
+
+Afterward immediately set:
+
+```env
+TRADING_ENABLED=0
+```
+
 ## Controlled demo trading
 
 Only after the read-only checks and Python execution tests pass:
@@ -90,7 +122,7 @@ Do not run Python execution and EA AutoTrading at the same time.
 
 If the diagnostic shows zero book levels, Pepperstone MT5 is not providing usable market-book data for that symbol/terminal. The bot can still use price, candle and quote data, but order-flow fields should be labelled estimated.
 
-If Level 2 is required, test Pepperstone's cTrader/Open API separately. cTrader is not enabled merely by changing `DATA_SOURCE`; it needs a separate provider, application credentials, OAuth/token flow and symbol mapping. Implement it only after the MT5 diagnostic result is recorded.
+If Level 2 is zero, record that result and use the preserved Rithmic/Databento futures providers when genuine Level 2/Level 3 order-flow is required. This package does not include another trading-platform integration.
 
 ## Changing broker later
 

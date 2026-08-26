@@ -23,6 +23,7 @@ TESTS = [
     "test_key_rotation.py",
     "test_news.py",
     "test_python_execution.py",
+    "test_reports.py",
     "e2e_test.py",
 ]
 

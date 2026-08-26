@@ -1,4 +1,4 @@
-# VERSION NOTE — MT5-data version (0.4.7)
+# VERSION NOTE — MT5-data version (0.6.0)
 
 This folder is the Pepperstone/MT5-ready foundation. The exact Pepperstone
 symbol is detected locally; do not put broker credentials in Git.

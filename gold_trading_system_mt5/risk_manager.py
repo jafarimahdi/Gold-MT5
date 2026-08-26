@@ -81,7 +81,7 @@ class RiskManager:
         if mt5 is None:
             return config.ACCOUNT_EQUITY
         try:
-            if not mt5.initialize():
+            if not config.mt5_initialize(mt5):
                 return config.ACCOUNT_EQUITY
             info = mt5.account_info()
             mt5.shutdown()
@@ -98,7 +98,7 @@ class RiskManager:
         now = now or _now()
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         try:
-            if not mt5.initialize():
+            if not config.mt5_initialize(mt5):
                 return 0.0
             deals = mt5.history_deals_get(day_start, now)
             mt5.shutdown()

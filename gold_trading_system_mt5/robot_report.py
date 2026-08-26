@@ -53,6 +53,24 @@ def _read_csv(path: Path) -> list:
         return []
 
 
+def _dedupe_outcomes(rows: list) -> list:
+    """Hide legacy duplicate outcome rows from reports.
+
+    New rows are protected by the logger's deal-ID state. This report-level
+    guard also keeps older CSV duplication from inflating the displayed stats.
+    """
+    seen = set()
+    out = []
+    fields = ("order_id", "symbol", "side", "pnl", "exit_price")
+    for row in rows:
+        key = tuple((row.get(k) or "").strip() for k in fields)
+        if any(key) and key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
 def _recent(rows: list, days: int) -> list:
     """Keep rows whose timestamp is within the last `days` days (0 = all)."""
     if days <= 0:
@@ -516,7 +534,8 @@ def main() -> int:
     args = parser.parse_args()
 
     decisions = _recent(_read_csv(DATA / "decisions_log.csv"), args.days)
-    outcomes = _recent(_read_csv(DATA / "trade_outcomes.csv"), args.days)
+    outcomes = _dedupe_outcomes(
+        _recent(_read_csv(DATA / "trade_outcomes.csv"), args.days))
 
     span = (f"last {args.days} days" if args.days > 0 else "all time")
     print(BAR)

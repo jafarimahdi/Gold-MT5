@@ -9,7 +9,7 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
 
 ---
 
-## 0. Version 0.4.7 — Pepperstone-ready Python execution foundation
+## 0. Version 0.6.0 — Pepperstone-ready Python execution foundation
 
 - Added Python position management: duplicate same-direction protection,
   close-opposite-and-reverse behavior, and manual-position protection.
@@ -17,14 +17,19 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
   mode selection.
 - Added `BROKER_NAME`, optional `MT5_TERMINAL_PATH` and signal expiry settings.
 - Added read-only `broker_diagnostic.py` for symbol, broker rules and Level 2.
-- Added `test_python_execution.py` and `run_all_tests.py`.
+- Added `test_python_execution.py`, `test_reports.py` and `run_all_tests.py`.
+- Added `deduplicate_trade_outcomes.py` and report-level de-duplication.
+- Added snapshot data-quality labels for live Level 2, live trade prints,
+  estimated candle flow and unavailable Level 3.
+- Added the explicitly confirmed `demo_order_test.py` to validate one small
+  Pepperstone open/close cycle without using Gemini or the EA.
 - Preferred the supported `google-genai` SDK while keeping a temporary legacy
   fallback for existing installations.
 - Added configurable modern Gemini request timeout and disabled unused
   automatic function-calling behavior for decision requests.
-- Added Pepperstone and cTrader setup documentation.
-- Preserved futures/Rithmic/Databento providers; cTrader, IB and simultaneous
-  MT5/futures fusion remain future integrations.
+- Added Pepperstone setup documentation.
+- Preserved futures/Rithmic/Databento providers; other platforms and simultaneous
+  MT5/futures fusion are outside this release.
 
 ---
 

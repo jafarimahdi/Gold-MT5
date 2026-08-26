@@ -118,6 +118,9 @@ def test_rithmic_l2_l3_flow():
     check("rithmic data has order book", len(data["order_book"]["bids"]) > 0)
     check("rithmic data has ticks", len(data["tick_data"]) == 40)
     check("rithmic data builds candles", len(data["candles"].get("close", [])) > 0)
+    check("rithmic data labels live L2", data["data_quality"]["level2"] == "available")
+    check("rithmic data labels live trade prints",
+          data["data_quality"]["trade_prints"] == "available")
 
     snap = analyze_market(data)
     check("analyze_market() consumes rithmic data", snap is not None)

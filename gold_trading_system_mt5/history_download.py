@@ -54,7 +54,7 @@ def main() -> int:
               "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
               "D1": mt5.TIMEFRAME_D1}
 
-    if not mt5.initialize():
+    if not config.mt5_initialize(mt5):
         print(f"ERROR: cannot connect to MT5: {mt5.last_error()}")
         print("       Is the MT5 terminal running and logged in?")
         return 1
