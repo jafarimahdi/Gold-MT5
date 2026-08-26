@@ -435,7 +435,7 @@ Completed in the owner's Git working copy:
 
 Repository cleanup preparation was completed for the previous version: generated files were removed from Git tracking and retained locally. Future commits must still stage only intended source/documentation files and must not use `git add .` when runtime files are present.
 
-### Version 0.4.5 — Pepperstone-ready Python execution foundation — 2026-08-26
+### Version 0.4.7 — Pepperstone-ready Python execution foundation — 2026-08-26
 
 A single downloadable source package is being prepared for the owner's new Pepperstone MT5 demo account. The package does not contain the private `.env`, virtual environment, runtime data or logs. It keeps the futures/Rithmic/Databento providers and adds a read-only Pepperstone broker diagnostic.
 
@@ -449,7 +449,9 @@ Implemented in the development workspace:
 - `BROKER_NAME` and signal-age configuration;
 - signal expiry field and MQL5 EA stale-signal rejection;
 - supported `google-genai` SDK preferred, with temporary legacy fallback;
+- configurable modern Gemini request timeout and unused AFC disabled;
 - immediate Gemini key failover preserved;
+- end-to-end test risk settings isolated from the user's personal `.env`, so the warning-mode sizing assertion remains valid when live demo settings cap `MAX_LOT_SIZE=0.01`;
 - one-command safe local test runner;
 - Pepperstone setup guide and cTrader investigation guide;
 - README, version note and handoff updates.
@@ -761,24 +763,26 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 Copy the following information when starting a new development conversation:
 
 ```text
-This is the Gold Trading System project.
+This is the Gold Trading System project, currently packaged as the Pepperstone-ready MT5-data foundation.
 
 Repository:
 https://github.com/jafarimahdi/Gold-MT5
 
 Please read gold_trading_system_mt5/AI_HANDOFF.md first.
-The intended runtime is Windows + MetaTrader 5 using the broker symbol XAUUSD+.
-The project must remain in safe observation mode until the execution path is clarified.
-Do not request or expose API keys, passwords or private credentials.
+The current broker test is Pepperstone Limited, server PepperstoneUK-Demo, using the exact symbol XAUUSD and terminal64.exe at:
+C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe
 
-Current known issues:
-1. The project contains generated files/venv that should be removed from Git.
-2. test_markets.py has one DATA_SYMBOL configuration mismatch.
-3. e2e_test.py has one DATA_SOURCE/environment-dependent mismatch.
-4. Python direct execution and the MQL5 EA signal path can both be active; add an explicit execution mode before auto-trading.
-5. Live MT5 and MQL5 behavior have not yet been verified.
+The package supports `EXECUTION_MODE=none|python|ea`; the owner's first supervised execution path is Python. The safe starting settings are `EXECUTION_MODE=none` and `TRADING_ENABLED=0`. Never request or expose API keys, passwords or private credentials.
 
-First ask me for the latest git commit, the current sanitized .env configuration, and the latest safe test output if they are not already available.
+Current validated facts:
+1. Pepperstone MT5 connection works.
+2. Pepperstone XAUUSD provided 10 Level 2 book levels in the diagnostic and the corrected main provider now maps them to bid/ask correctly.
+3. The local safe test runner passes all 9 test files, including Python execution tests and the end-to-end mock test.
+4. MT5 CFD data has no Level 3 events; quote tick last/volume may be zero, so some CVD/footprint values are estimated.
+5. Real Pepperstone order acceptance, MQL5 compilation, EA behavior, cTrader and Interactive Brokers are not yet verified.
+6. The current modern Gemini client has a configurable request timeout; keep the latest timeout behavior documented by the current source.
+
+First ask me for the latest git commit, the current sanitized `.env` configuration, and the latest safe test output if they are not already available. Preserve and update this handoff after every version improvement. Do not delete or move files without explaining why and asking first.
 ```
 
 ---

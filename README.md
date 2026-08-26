@@ -1,4 +1,4 @@
-# Gold MT5 / Pepperstone-ready Trading System — v0.4.5
+# Gold MT5 / Pepperstone-ready Trading System — v0.4.7
 
 This repository contains the automated gold-trading application in:
 

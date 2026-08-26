@@ -166,6 +166,9 @@ def _refresh() -> None:
     # How long a rate-limited key is skipped on later cycles. This is NOT a
     # wait between keys: failover to the next key is immediate.
     g["AI_KEY_COOLDOWN_MINUTES"] = _fint("AI_KEY_COOLDOWN_MINUTES", 20)
+    # Maximum duration for one modern Gemini request, in milliseconds.
+    # A failed request then moves to the next key/model immediately.
+    g["GEMINI_REQUEST_TIMEOUT_MS"] = _fint("GEMINI_REQUEST_TIMEOUT_MS", 20000)
     g["RISK_PER_TRADE_PCT"] = _ffloat("RISK_PER_TRADE_PCT", 1.0)
     g["STOP_LOSS_ATR_MULT"] = _ffloat("STOP_LOSS_ATR_MULT", 1.5)
     g["TAKE_PROFIT_ATR_MULT"] = _ffloat("TAKE_PROFIT_ATR_MULT", 3.0)

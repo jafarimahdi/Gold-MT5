@@ -13,7 +13,7 @@ def _requirements() -> list:
 
 setup(
     name="gold_trading_system",
-    version="0.4.5",
+    version="0.4.7",
     description="Automated gold (XAUUSD) trading pipeline: "
                 "data -> analysis -> AI decision -> execution -> monitoring",
     packages=find_packages(),

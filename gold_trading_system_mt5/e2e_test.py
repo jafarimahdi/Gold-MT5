@@ -37,9 +37,12 @@ class _FakeModels:
 
 
 class _FakeClient:
-    def __init__(self, api_key):
+    def __init__(self, api_key, **kwargs):
         self.api_key = api_key
         self.models = _FakeModels()
+
+    def close(self):
+        pass
 
 
 fake_genai.Client = _FakeClient
@@ -169,6 +172,15 @@ config.AI_CONFIDENCE_THRESHOLD = 70.0
 # pipeline. It is therefore safe to enable the execution gate for the mock
 # order assertions, even when the user's real .env has trading disabled.
 config.TRADING_ENABLED = True
+# Isolate mock execution settings from the user's personal .env. In
+# particular, a live demo test may cap MAX_LOT_SIZE at 0.01, which would make
+# the warning-mode size reduction round back to the same minimum volume.
+config.RISK_PER_TRADE_PCT = 1.0
+config.MAX_LOT_SIZE = 1.0
+config.LOT_SIZE = 0.1
+config.CONTRACT_SIZE = 100.0
+config.ACCOUNT_EQUITY = 10000.0
+config.NEWS_REDUCE_SIZE_PCT = 0.5
 # The direct order assertions in this test represent Python execution mode.
 config.EXECUTION_MODE = "python"
 

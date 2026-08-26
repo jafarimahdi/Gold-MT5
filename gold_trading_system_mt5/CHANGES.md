@@ -9,7 +9,7 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
 
 ---
 
-## 0. Version 0.4.5 — Pepperstone-ready Python execution foundation
+## 0. Version 0.4.7 — Pepperstone-ready Python execution foundation
 
 - Added Python position management: duplicate same-direction protection,
   close-opposite-and-reverse behavior, and manual-position protection.
@@ -20,6 +20,8 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
 - Added `test_python_execution.py` and `run_all_tests.py`.
 - Preferred the supported `google-genai` SDK while keeping a temporary legacy
   fallback for existing installations.
+- Added configurable modern Gemini request timeout and disabled unused
+  automatic function-calling behavior for decision requests.
 - Added Pepperstone and cTrader setup documentation.
 - Preserved futures/Rithmic/Databento providers; cTrader, IB and simultaneous
   MT5/futures fusion remain future integrations.

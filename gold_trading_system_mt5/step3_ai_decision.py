@@ -253,11 +253,46 @@ class AIDecisionEngine:
         wants failover without waiting for a per-minute quota to recover.
         """
         if genai is _modern_genai:
-            client = genai.Client(api_key=key)
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-            )
+            client = None
+            try:
+                # The supported SDK expects timeout in milliseconds. Disable
+                # automatic function calling because this bot does not expose
+                # tools to Gemini and only needs a text decision.
+                try:
+                    from google.genai import types as genai_types
+                except ImportError:
+                    # A minimal modern SDK mock may expose Client but not types.
+                    genai_types = None
+
+                if genai_types is not None:
+                    http_options = genai_types.HttpOptions(
+                        timeout=max(1000, int(getattr(
+                            config, "GEMINI_REQUEST_TIMEOUT_MS", 20000)))
+                    )
+                    request_config = genai_types.GenerateContentConfig(
+                        automatic_function_calling=(
+                            genai_types.AutomaticFunctionCallingConfig(disable=True)
+                        )
+                    )
+                    client = genai.Client(api_key=key,
+                                          http_options=http_options)
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=request_config,
+                    )
+                else:
+                    client = genai.Client(api_key=key)
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                    )
+            finally:
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
         else:
             # Temporary fallback for environments that have not installed the
             # supported SDK yet, and for the legacy mock tests.
