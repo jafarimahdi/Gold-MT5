@@ -37,6 +37,7 @@ fake_mt5.TRADE_RETCODE_DONE_PARTIAL = 10010
 
 positions = []
 orders = []
+account_state = {"equity": 10000.0, "margin_free": 10000.0}
 
 
 def initialize(**kwargs):
@@ -64,7 +65,15 @@ def symbol_info(symbol):
 
 
 def account_info():
-    return SimpleNamespace(equity=10000.0)
+    return SimpleNamespace(**account_state)
+
+
+def order_calc_margin(order_type, symbol, volume, price):
+    return float(volume) * 100.0
+
+
+def order_check(request):
+    return SimpleNamespace(retcode=0)
 
 
 def positions_get(symbol=None):
@@ -73,7 +82,15 @@ def positions_get(symbol=None):
 
 def order_send(request):
     orders.append(dict(request))
-    return SimpleNamespace(retcode=10009, order=100000 + len(orders))
+    ticket = 100000 + len(orders)
+    if "position" in request:
+        positions[:] = [p for p in positions
+                        if getattr(p, "ticket", None) != request["position"]]
+    else:
+        positions.append(SimpleNamespace(
+            ticket=ticket, symbol=request["symbol"], type=request["type"],
+            volume=request["volume"], magic=request["magic"]))
+    return SimpleNamespace(retcode=10009, order=ticket, deal=ticket + 1000)
 
 
 fake_mt5.initialize = initialize
@@ -82,6 +99,8 @@ fake_mt5.last_error = last_error
 fake_mt5.symbol_info_tick = symbol_info_tick
 fake_mt5.symbol_info = symbol_info
 fake_mt5.account_info = account_info
+fake_mt5.order_calc_margin = order_calc_margin
+fake_mt5.order_check = order_check
 fake_mt5.positions_get = positions_get
 fake_mt5.order_send = order_send
 sys.modules["MetaTrader5"] = fake_mt5
@@ -105,6 +124,8 @@ def make_snapshot():
 def reset():
     positions.clear()
     orders.clear()
+    account_state["equity"] = 10000.0
+    account_state["margin_free"] = 10000.0
     config.TRADING_ENABLED = True
     config.EXECUTION_MODE = "python"
 
@@ -127,6 +148,13 @@ def main():
     result = executor.execute(decision, snap)
     check("EA mode blocks Python executor", result.status == "SKIPPED")
     check("EA mode sends no order", len(orders) == 0)
+
+    # Margin preflight must reject before order_send when free margin is low.
+    reset()
+    account_state["margin_free"] = 1.0
+    result = executor.execute(decision, snap)
+    check("insufficient margin is rejected", result.status == "ERROR")
+    check("insufficient margin sends no order", len(orders) == 0)
 
     # Same-direction bot position must not be duplicated.
     reset()

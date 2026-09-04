@@ -29,7 +29,7 @@
 //|   2) Attach to an XAUUSD chart, enable AutoTrading.               |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trading System"
-#property version   "3.20"
+#property version   "3.21"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -51,7 +51,8 @@ datetime g_lastSignalId = 0;   // id of the last signal already acted upon
 int OnInit()
   {
    trade.SetExpertMagicNumber(InpMagic);
-   Print("GoldTradingEA v3.20 attached. Reading file: ", InpSignalFile);
+   trade.SetTypeFillingBySymbol(_Symbol);
+   Print("GoldTradingEA v3.21 attached. Reading file: ", InpSignalFile);
    return(INIT_SUCCEEDED);
   }
 
@@ -69,20 +70,46 @@ void OnTick()
   }
 
 //+------------------------------------------------------------------+
+//| Return true when a position belongs to this EA.                  |
+//| The account can be hedging, so never use PositionSelect(symbol)  |
+//| as a substitute for checking every position's magic number.      |
+//+------------------------------------------------------------------+
+bool IsBotPosition()
+  {
+   return(PositionGetInteger(POSITION_MAGIC) == InpMagic &&
+          PositionGetString(POSITION_SYMBOL) == _Symbol);
+  }
+
+//+------------------------------------------------------------------+
+//| Close every bot position for this symbol before a reversal.      |
+//+------------------------------------------------------------------+
+bool CloseBotPositions()
+  {
+   bool ok = true;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !IsBotPosition())
+         continue;
+      if(!trade.PositionClose(ticket))
+        {
+         Print("GoldTradingEA: could not close bot position ticket=", ticket,
+               " retcode=", trade.ResultRetcode());
+         ok = false;
+        }
+     }
+   return ok;
+  }
+
+//+------------------------------------------------------------------+
 //| Move the stop-loss to lock in profit as price moves in our favour |
 //+------------------------------------------------------------------+
 void ApplyTrailingStop()
   {
    if(!InpUseTrailing)
       return;
-   if(!PositionSelect(_Symbol))
-      return;
 
-   long   posType   = PositionGetInteger(POSITION_TYPE);
-   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-   double sl        = PositionGetDouble(POSITION_SL);
-   double tp        = PositionGetDouble(POSITION_TP);
-   double point     = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    if(point <= 0)
       return;
 
@@ -90,19 +117,31 @@ void ApplyTrailingStop()
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-   if(posType == POSITION_TYPE_BUY)
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
-      double newSL = bid - trailDist;
-      // only move the stop UP, and only after we are past break-even
-      if(newSL > sl && newSL > openPrice)
-         trade.PositionModify(_Symbol, newSL, tp);
-     }
-   else if(posType == POSITION_TYPE_SELL)
-     {
-      double newSL = ask + trailDist;
-      // only move the stop DOWN, and only after we are past break-even
-      if(newSL < sl && newSL < openPrice)
-         trade.PositionModify(_Symbol, newSL, tp);
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !IsBotPosition())
+         continue;
+
+      long   posType   = PositionGetInteger(POSITION_TYPE);
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl        = PositionGetDouble(POSITION_SL);
+      double tp        = PositionGetDouble(POSITION_TP);
+
+      if(posType == POSITION_TYPE_BUY)
+        {
+         double newSL = bid - trailDist;
+         // only move the stop UP, and only after we are past break-even
+         if((sl <= 0 || newSL > sl) && newSL > openPrice)
+            trade.PositionModify(ticket, newSL, tp);
+        }
+      else if(posType == POSITION_TYPE_SELL)
+        {
+         double newSL = ask + trailDist;
+         // only move the stop DOWN, and only after we are past break-even
+         if((sl <= 0 || newSL < sl) && newSL < openPrice)
+            trade.PositionModify(ticket, newSL, tp);
+        }
      }
   }
 
@@ -210,22 +249,47 @@ void ProcessSignalFile()
       return;                          // never trade into news
 
    // ---- current position state ---------------------------------------
-   bool hasPos = PositionSelect(_Symbol);
-   long posType = -1;
-   if(hasPos)
-      posType = PositionGetInteger(POSITION_TYPE);
+   // In a hedging account there can be several positions for one symbol.
+   // Never touch a manual or other-EA position, and do not add to it.
+   bool hasOtherPosition = false;
+   bool hasBotPosition = false;
+   long botType = -1;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if(IsBotPosition())
+        {
+         if(!hasBotPosition)
+            botType = PositionGetInteger(POSITION_TYPE);
+         hasBotPosition = true;
+        }
+      else
+         hasOtherPosition = true;
+     }
+
+   if(hasOtherPosition)
+     {
+      Print("GoldTradingEA: another position already exists on ", _Symbol,
+            "; no order sent to protect manual/other-EA trades.");
+      return;
+     }
 
    int wantType = (dir == "BUY") ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
-   if(hasPos && posType == wantType)
+   if(hasBotPosition && botType == wantType)
       return;                          // already positioned correctly
 
-   // ---- close opposite position (auto-reverse) ------------------------
-   if(hasPos && posType != wantType)
-      trade.PositionClose(_Symbol);
+   // ---- close opposite bot positions (auto-reverse) -------------------
+   if(hasBotPosition && botType != wantType && !CloseBotPositions())
+      return;                          // never open if the close failed
 
    // ---- live CFD price on this chart (NOT the futures price) ---------
    double price = SymbolInfoDouble(_Symbol,
                                    (dir == "BUY") ? SYMBOL_ASK : SYMBOL_BID);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(price <= 0 || point <= 0)
+      return;
 
    // ---- SL/TP ---------------------------------------------------------
    double sl = 0.0, tp = 0.0;
@@ -247,16 +311,26 @@ void ProcessSignalFile()
       if(tp <= 0 && GetValue(content, "tp", s)) tp = StringToDouble(s);
 
       if(sl <= 0)
-         sl = (dir == "BUY") ? price - InpFallbackSL : price + InpFallbackSL;
+         sl = (dir == "BUY") ? price - InpFallbackSL * point
+                              : price + InpFallbackSL * point;
       if(tp <= 0)
-         tp = (dir == "BUY") ? price + InpFallbackTP : price - InpFallbackTP;
+         tp = (dir == "BUY") ? price + InpFallbackTP * point
+                              : price - InpFallbackTP * point;
      }
 
    // ---- open the trade with YOUR lot size -----------------------------
+   bool sent = false;
    if(dir == "BUY")
-      trade.Buy(InpManualLots, _Symbol, 0.0, sl, tp, "gold-bot BUY");
+      sent = trade.Buy(InpManualLots, _Symbol, 0.0, sl, tp, "gold-bot BUY");
    else
-      trade.Sell(InpManualLots, _Symbol, 0.0, sl, tp, "gold-bot SELL");
+      sent = trade.Sell(InpManualLots, _Symbol, 0.0, sl, tp, "gold-bot SELL");
+
+   if(!sent)
+     {
+      Print("GoldTradingEA: order failed retcode=", trade.ResultRetcode(),
+            " description=", trade.ResultRetcodeDescription());
+      return;
+     }
 
    PrintFormat("GoldTradingEA: %s %.2f lots @ %.2f (SL %.2f / TP %.2f, conf %.1f%%)",
                dir, InpManualLots, price, sl, tp, conf);

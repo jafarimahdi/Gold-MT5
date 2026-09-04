@@ -458,9 +458,9 @@ def run_step4(decision, snapshot):
 
 def run_step5():
     from step5_monitoring import TradeMonitor
-    TradeMonitor().single_pass()
+    positions = TradeMonitor().single_pass()
     _record("STEP 5  MONITORING", "OK")
-    return None
+    return positions
 
 
 def run_signal_bridge(snapshot, decision) -> None:
@@ -487,6 +487,135 @@ def run_signal_bridge(snapshot, decision) -> None:
 _OUTCOME_LOG_FIELDS = ["timestamp", "order_id", "symbol", "side", "pnl",
                        "exit_price", "comment"]
 _OUTCOME_KEYS_FILE = DATA_DIR / "logged_outcome_deals.json"
+_POSITION_IDS_FILE = DATA_DIR / "tracked_bot_positions.json"
+_PLUMBING_DEALS_FILE = DATA_DIR / "plumbing_test_deals.json"
+
+
+def _as_position_id(value):
+    """Return a positive integer position ID, or None for invalid values."""
+    try:
+        number = int(value)
+        return number if number > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_plumbing_test_position_ids() -> set:
+    """Load position IDs from the explicit demo plumbing test only."""
+    ids = set()
+    test_result = DATA_DIR / "demo_order_test_result.json"
+    try:
+        if test_result.exists():
+            result = json.loads(test_result.read_text(encoding="utf-8"))
+            for value in result.get("position_ids", []) or []:
+                number = _as_position_id(value)
+                if number:
+                    ids.add(number)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return ids
+
+
+def _load_tracked_position_ids() -> set:
+    """Load strategy position IDs whose close deals should be checked.
+
+    Position-specific MT5 history is reliable on Pepperstone, while the
+    date-range history call can omit XAUUSD deals. Explicit plumbing-test
+    positions are excluded so they never enter strategy performance or the
+    strategy risk calculation.
+    """
+    ids = set()
+    plumbing_ids = _load_plumbing_test_position_ids()
+    try:
+        if _POSITION_IDS_FILE.exists():
+            state = json.loads(_POSITION_IDS_FILE.read_text(encoding="utf-8"))
+            for value in state.get("position_ids", []) or []:
+                number = _as_position_id(value)
+                if number and number not in plumbing_ids:
+                    ids.add(number)
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    # Decision rows store the opening order ID. Use it as a compatibility
+    # candidate because Pepperstone's netting account returned the opening
+    # order and position with the same ID in the verified demo test.
+    decisions = DATA_DIR / "decisions_log.csv"
+    try:
+        if decisions.exists():
+            with open(decisions, "r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    if (row.get("exec_status") or "").strip() != "EXECUTED":
+                        continue
+                    number = _as_position_id(row.get("order_id"))
+                    if number and number not in plumbing_ids:
+                        ids.add(number)
+    except (OSError, csv.Error):
+        pass
+    return ids
+
+
+def _save_plumbing_test_deals(deals: list) -> None:
+    """Persist deal IDs belonging to explicit broker plumbing tests.
+
+    This is metadata only. It does not rewrite or delete the audit CSV. The
+    report uses these IDs to exclude plumbing tests from strategy statistics.
+    """
+    if not deals:
+        return
+    records = []
+    try:
+        if _PLUMBING_DEALS_FILE.exists():
+            state = json.loads(_PLUMBING_DEALS_FILE.read_text(encoding="utf-8"))
+            records = list(state.get("deals", []) or [])
+    except (json.JSONDecodeError, OSError):
+        records = []
+    by_id = {str(row.get("deal_id")): row for row in records
+             if isinstance(row, dict) and row.get("deal_id") not in (None, "", 0)}
+    for deal in deals:
+        deal_id = deal.get("deal_id")
+        if deal_id in (None, "", 0):
+            continue
+        record = by_id.get(str(deal_id))
+        values = {
+            "deal_id": deal_id,
+            "position_id": deal.get("position_id"),
+            "symbol": deal.get("symbol", config.MT5_SYMBOL),
+            "side": deal.get("side", deal.get("type", "")),
+            "pnl": deal.get("pnl", 0.0),
+            "price": deal.get("price", 0.0),
+        }
+        if record is None:
+            record = {**values,
+                      "recorded_at": datetime.now().isoformat(timespec="seconds")}
+            records.append(record)
+            by_id[str(deal_id)] = record
+        else:
+            # Complete metadata created by an older package without duplicating
+            # the already-known audit deal.
+            for key, value in values.items():
+                if record.get(key) in (None, "") and value not in (None, ""):
+                    record[key] = value
+    try:
+        _PLUMBING_DEALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PLUMBING_DEALS_FILE.write_text(json.dumps({
+            "deals": records,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not persist plumbing-test deal IDs: %s", exc)
+
+
+def _save_tracked_position_ids(position_ids: set) -> None:
+    """Persist bot position IDs for reliable post-close history lookup."""
+    clean = sorted({_as_position_id(value) for value in position_ids} - {None})
+    try:
+        _POSITION_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _POSITION_IDS_FILE.write_text(json.dumps({
+            "position_ids": clean,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not persist tracked position IDs: %s", exc)
 
 
 def _outcome_signature(deal: dict) -> str:
@@ -501,21 +630,19 @@ def _load_logged_outcome_keys() -> set:
     The CSV already contains rows from older versions that did not store a
     unique MT5 deal ID. Their stable fields are used as a one-time fallback so
     the first run after this fix does not append the same historical deals
-    again.
+    again. If the CSV is empty, ignore a stale state file so verified deals can
+    be rebuilt instead of being silently hidden from the report.
     """
     keys = set()
-    try:
-        if _OUTCOME_KEYS_FILE.exists():
-            state = json.loads(_OUTCOME_KEYS_FILE.read_text(encoding="utf-8"))
-            keys.update(str(k) for k in (state.get("keys") or []))
-    except (json.JSONDecodeError, OSError):
-        pass
-
     csv_path = DATA_DIR / "trade_outcomes.csv"
+    csv_has_rows = False
+
     try:
         if csv_path.exists():
             with open(csv_path, "r", newline="", encoding="utf-8") as fh:
                 for row in csv.DictReader(fh):
+                    if any((value or "").strip() for value in row.values()):
+                        csv_has_rows = True
                     keys.add(_outcome_signature({
                         "position_id": row.get("order_id", ""),
                         "symbol": row.get("symbol", ""),
@@ -525,6 +652,16 @@ def _load_logged_outcome_keys() -> set:
                     }))
     except (OSError, csv.Error):
         pass
+
+    # A state file without its corresponding CSV is not enough to suppress a
+    # report row: the deal details can still be recovered from MT5 history.
+    if csv_has_rows:
+        try:
+            if _OUTCOME_KEYS_FILE.exists():
+                state = json.loads(_OUTCOME_KEYS_FILE.read_text(encoding="utf-8"))
+                keys.update(str(k) for k in (state.get("keys") or []))
+        except (json.JSONDecodeError, OSError):
+            pass
     return keys
 
 
@@ -576,6 +713,8 @@ def run_pipeline() -> None:
     """One full pass through all 5 steps."""
     STATUS.clear()
     config.reload_env()   # pick up edited .env (credentials/markets) each cycle
+    plumbing_position_ids = _load_plumbing_test_position_ids()
+    tracked_position_ids = _load_tracked_position_ids()
     _touch_lock()         # keep the single-instance lock fresh
 
     # automatic file maintenance (runs at most once per day — keeps the app
@@ -654,8 +793,14 @@ def run_pipeline() -> None:
     if decision is not None:
         try:
             exec_result = run_step4(decision, snapshot)
-            # a position was actually opened -> record it for the cooldown/cap
+            # A position was actually opened -> remember its position ID for
+            # reliable post-close history lookup and record the cooldown/cap.
             if exec_result is not None and getattr(exec_result, "status", "") == "EXECUTED":
+                position_id = (getattr(exec_result, "position_id", None)
+                               or getattr(exec_result, "order_id", None))
+                position_id = _as_position_id(position_id)
+                if position_id:
+                    tracked_position_ids.add(position_id)
                 try:
                     from trade_guard import TradeGuard
                     TradeGuard().record_trade()
@@ -668,20 +813,37 @@ def run_pipeline() -> None:
         _record("STEP 4  EXECUTION", "SKIPPED (no decision)")
 
     # STEP 5
+    open_positions = []
     try:
-        run_step5()
+        open_positions = run_step5() or []
+        # Also learn about positions that were already open before this
+        # process started. Their IDs remain tracked after they close.
+        for position in open_positions:
+            position_id = _as_position_id(
+                position.get("position_id", position.get("ticket")))
+            if position_id:
+                tracked_position_ids.add(position_id)
     except Exception as exc:
         logger.exception("STEP 5 failed")
         _record("STEP 5  MONITORING", f"ERROR — {exc}")
+    _save_tracked_position_ids(tracked_position_ids)
 
     # ---- trade-outcome logging (closed MT5 deals -> data/trade_outcomes.csv) --
-    # MT5 history_deals_get returns all matching deals on every poll. Persist
-    # unique IDs/signatures so the same closed deal is logged only once.
+    # Pepperstone reliably returns these deals when queried by position ID.
+    # Persist unique IDs/signatures so the same closed deal is logged only once.
     try:
         from step5_monitoring import TradeMonitor
+        monitor = TradeMonitor()
+        if plumbing_position_ids:
+            # Record the deal IDs separately so robot_report.py can preserve
+            # the audit evidence while excluding these tests from strategy
+            # performance statistics.
+            _save_plumbing_test_deals(
+                monitor.check_closed_deals(position_ids=plumbing_position_ids))
         logged_keys = _load_logged_outcome_keys()
         new_keys = set()
-        for deal in TradeMonitor().check_closed_deals():
+        for deal in monitor.check_closed_deals(
+                position_ids=tracked_position_ids):
             deal_id = deal.get("deal_id")
             id_key = f"deal:{deal_id}" if deal_id not in (None, "", 0) else ""
             sig_key = _outcome_signature(deal)
@@ -690,7 +852,7 @@ def run_pipeline() -> None:
             log_trade_outcome(
                 order_id=deal_id or deal.get("position_id"),
                 symbol=deal.get("symbol", config.MT5_SYMBOL),
-                side=deal.get("type", ""),
+                side=deal.get("side", deal.get("type", "")),
                 pnl=deal.get("pnl", 0.0),
                 exit_price=deal.get("price", 0.0),
                 comment="closed deal")

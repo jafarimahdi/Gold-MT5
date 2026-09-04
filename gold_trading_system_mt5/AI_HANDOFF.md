@@ -2,10 +2,12 @@
 
 **Purpose:** This file is the durable project handoff for future development. Any new developer or AI assistant should read this file before changing the application.
 
-**Last updated:** 2026-08-26
-**Repository:** https://github.com/jafarimahdi/Gold-MT5
-**Branch reviewed:** `main`
-**Commit reviewed:** `5e718a3` (`upload app`)
+**Last updated:** 2026-08-27  
+**Current version:** 0.6.7 — final reporting, risk, EA and test-isolation package  
+**Repository:** https://github.com/jafarimahdi/Gold-MT5  
+**Branch reviewed:** `main`  
+**Base commit reviewed:** `5e718a3` (`upload app`)  
+**0.6.7 status:** implemented and fully validated in the development workspace; final ZIP prepared after package-content check  
 **Application directory:** `gold_trading_system_mt5/`
 
 > Keep this file inside the application folder and update it after every meaningful version improvement. Never put real API keys, passwords, tokens, private certificates, or the real `.env` file in this document.
@@ -17,7 +19,7 @@
 This project is a Python-based automated gold-trading system for MetaTrader 5. It is designed to work with the broker's gold symbol, currently:
 
 ```text
-XAUUSD+
+XAUUSD
 ```
 
 The application can:
@@ -133,23 +135,24 @@ e2e_test.py
 
 ## 4. Intended current runtime configuration
 
-The owner's local `.env` was supplied without secrets. The intended configuration is:
+The owner's local `.env` was supplied without secrets. The intended current Pepperstone configuration is:
 
 ```env
 DATA_SOURCE=mt5
-MT5_SYMBOL=XAUUSD+
-TRADING_SYMBOL=XAUUSD+
-DATA_SYMBOL=XAUUSD+
+MT5_SYMBOL=XAUUSD
+TRADING_SYMBOL=XAUUSD
+DATA_SYMBOL=XAUUSD
 DATA_MARKET=XAUUSD
 TRADE_MARKET=XAUUSD
 MT5_LOGIN=0
+EXECUTION_MODE=python
+TRADING_ENABLED=0
 ```
 
 ### Meaning of the symbol settings
 
-- `XAUUSD+` is the exact broker symbol used by MT5.
-- Internally, `markets.py` normalizes `XAUUSD+` to canonical market ID `XAUUSD`.
-- The plus sign must not be removed when communicating with MT5 if that is the symbol displayed by the broker.
+- `XAUUSD` is the exact Pepperstone symbol used by MT5.
+- The application may normalize equivalent market names internally, but MT5 communication must use the exact configured symbol.
 - Confirm the exact symbol in MT5 Market Watch before running the bot.
 
 `MT5_LOGIN=0` means the program connects to the already-open and logged-in MT5 terminal. It does not need the MT5 password or server in that mode.
@@ -435,7 +438,7 @@ Completed in the owner's Git working copy:
 
 Repository cleanup preparation was completed for the previous version: generated files were removed from Git tracking and retained locally. Future commits must still stage only intended source/documentation files and must not use `git add .` when runtime files are present.
 
-### Version 0.6.0 — Pepperstone-ready Python execution foundation — 2026-08-26
+### Version 0.6.4 — Pepperstone-ready Python execution foundation — 2026-08-26
 
 A single downloadable source package is being prepared for the owner's new Pepperstone MT5 demo account. The package does not contain the private `.env`, virtual environment, runtime data or logs. It keeps the futures/Rithmic/Databento providers and adds a read-only Pepperstone broker diagnostic.
 
@@ -454,6 +457,8 @@ Implemented in the development workspace:
 - end-to-end test risk settings isolated from the user's personal `.env`, so the warning-mode sizing assertion remains valid when live demo settings cap `MAX_LOT_SIZE=0.01`;
 - added `deduplicate_trade_outcomes.py` and report-level de-duplication so old repeated rows do not inflate statistics;
 - added snapshot `data_quality` labels for live Level 2, live trade prints, estimated candle flow and unavailable Level 3;
+- added required-margin preflight and MT5 `order_check()` before `order_send()`;
+- added post-send position and history verification to `demo_order_test.py`; it now refuses to report success unless the position appears, closes and open/close deals are visible;
 - one-command safe local test runner;
 - explicit supervised `demo_order_test.py` for broker order plumbing (never a strategy test);
 - report de-duplication utility and test;
@@ -462,9 +467,111 @@ Implemented in the development workspace:
 
 The owner's selected first execution path is Python-only. EA support remains available but should be inactive while Python execution is tested. Pepperstone uses the exact symbol `XAUUSD`; the package includes the explicit terminal path and a read-only broker diagnostic. No broker credentials are included in the package.
 
-Workspace validation for this foundation: all 10 local test files passed, including `test_python_execution.py` 16/16, `test_markets.py` 29/29, `test_key_rotation.py` 9/9, `test_session_risk.py` 25/25, and `e2e_test.py` 32/32. MQL5 compilation and Pepperstone live order behavior remain Windows-side checks.
+Workspace validation for this foundation: the full local runner now passes all 12 test files. MQL5 compilation remains a Windows-side check.
 
-### Owner's current Windows operating context — updated 2026-08-26
+### Version 0.6.5 — position-specific MT5 history reporting fix — 2026-08-26
+
+The Pepperstone terminal returned the two real deals when queried by position ID:
+
+```text
+position 86160935 -> open deal 57028893, close deal 57028912
+```
+
+The date-range query returned only one non-XAUUSD balance/deposit record. This proved that the date-range path was unreliable for this terminal even though position-specific history worked.
+
+Changed files:
+
+- `step5_monitoring.py`: added position-specific closed-deal retrieval, original entry-side detection and deal-ID de-duplication;
+- `step4_mt5_execution.py`: preserves the verified MT5 position ID in `ExecutionResult` metadata;
+- `main.py`: persists strategy position IDs, records plumbing-test deal metadata separately, and passes IDs to Step 5 history logging; stale outcome state is ignored when the outcome CSV is empty so verified rows can be rebuilt;
+- `risk_manager.py`: uses tracked strategy position history, includes commissions/fees, excludes explicit plumbing tests and removes the invalid future-date fallback;
+- `robot_report.py`: separates plumbing-test outcomes from strategy statistics and displays original entry-side metadata when available;
+- `GoldTradingEA.mq5`: protects manual/other-EA positions on hedging accounts, closes all bot positions before reversal, checks order results, selects broker filling mode and interprets fallback stops as points;
+- `test_mt5_history.py`: fake-MT5 regression test for Pepperstone-style position history;
+- `test_risk_history.py`: fake-MT5 regression test for daily risk PnL;
+- `run_all_tests.py`: includes the history and risk tests;
+- `AI_HANDOFF.md`: records the diagnosis, scope, test results and limitations.
+
+The change does not alter the active settings. Windows verification must continue with:
+
+```env
+EXECUTION_MODE=python
+TRADING_ENABLED=0
+```
+
+Tests for this change:
+
+```text
+Python compilation                  PASS
+test_mt5_history.py                  6/6
+test_risk_history.py                 2/2
+test_reports.py                      2/2
+test_python_execution.py            18/18
+test_markets.py                     29/29
+e2e_test.py                         32/32
+ALL 12 LOCAL TEST FILES PASSED
+```
+
+Live Windows evidence: `history_deals_get(position=86160935)` returned both real Pepperstone deals with `last_error=(1, 'Success')`. The owner installed the 0.6.7 source and ran a safe pass with `TRADING_ENABLED=0`. The application imported close deal `57028912` once, then the report classified it as one broker-plumbing audit outcome and zero strategy trades. The owner chose to keep explicit demo plumbing tests separate from strategy performance, so the earlier verified position `86157466` must not be added to strategy statistics.
+
+Current known limitations:
+
+- the existing audit row remains in `trade_outcomes.csv` for evidence and is excluded from strategy metrics by `plumbing_test_deals.json`;
+- old position IDs are recovered from prior executed rows, but a fresh bot should persist every newly verified strategy position;
+- risk history now uses tracked strategy positions, but behavior must still be observed safely before trading is enabled;
+- report PnL includes commission and fees, so it may differ from the MT5 History screen's displayed gross figure;
+- the real strategy has not been shown profitable;
+- MQL5 compilation and EA behavior remain unverified;
+- the owner confirmed the active Windows `.env` intentionally uses `AI_MIN_SIGNAL_STRENGTH=7`; this is a deliberate setting, not a configuration error.
+
+### Version 0.6.6 — reporting separation, risk-history fix and EA hardening — 2026-08-26
+
+Implemented after the owner approved the complete fix plan:
+
+- `main.py` records explicit plumbing-test deal IDs in `data/plumbing_test_deals.json` without deleting the audit CSV;
+- `robot_report.py` excludes those IDs from strategy performance and displays them in a separate broker-plumbing section;
+- closed-outcome side reporting now uses the original entry direction when the position history contains it;
+- `risk_manager.py` uses tracked strategy position queries, includes profit, swap, commission and fee, excludes plumbing tests, and removes the invalid future-date fallback;
+- `GoldTradingEA.mq5` now protects manual/other-EA positions on hedging accounts, handles all bot positions before reversal, checks trade results, selects symbol filling mode and applies fallback SL/TP values in points;
+- `test_markets.py` is environment-independent;
+- `e2e_test.py` forces its fake MT5 source and remains independent of the user's `.env`;
+- added `test_risk_history.py` and expanded report/history tests.
+
+Validation:
+
+```text
+ALL 12 LOCAL TEST FILES PASSED
+```
+
+The live Pepperstone terminal was not modified by these changes. The final Windows checks still require a safe `main.py` pass with `TRADING_ENABLED=0`, report review and MetaEditor compilation. No secrets were requested, stored or added.
+
+### Version 0.6.7 — test data isolation — 2026-08-27
+
+The end-to-end test now uses a temporary data and logs directory and restores all
+runtime paths after completion. It no longer writes fake decisions, fake
+positions, trade-guard state, risk state or signal files into the owner's real
+runtime folders.
+
+Validation:
+
+```text
+Full local runner: ALL 12 LOCAL TEST FILES PASSED
+E2E test:          32/32
+Runtime-data hash: unchanged before and after isolated E2E test
+```
+
+Windows safe validation after installation:
+
+```text
+Pepperstone connection: OK
+XAUUSD data:            OK
+Level 2:                live during the safe pass
+Trading:                disabled
+Strategy trades:        0
+Plumbing tests:         1, excluded from strategy statistics
+```
+
+### Owner's current Windows operating context — updated 2026-08-27
 
 The owner has migrated the demo test from Vantage to Pepperstone. The GitHub working copy is on drive `A:` and the application is run from:
 
@@ -489,7 +596,7 @@ The Pepperstone demo account reports company `Pepperstone Limited` and server `P
 The owner's selected first execution test is Python-only, with both execution modes preserved in the package. The safe local settings are:
 
 ```env
-EXECUTION_MODE=none
+EXECUTION_MODE=python
 TRADING_ENABLED=0
 ```
 
@@ -501,7 +608,7 @@ The owner also uses `start_report.bat`. It calls `robot_report.py`, reads the de
 
 ### Historical test inconsistencies — resolved
 
-Earlier versions had a broker-symbol assertion mismatch (`XAUUSD` versus broker suffixes) and an environment-dependent end-to-end assertion. These were corrected. The current workspace test suite passes all 9 local test files.
+Earlier versions had a broker-symbol assertion mismatch (`XAUUSD` versus broker suffixes) and an environment-dependent end-to-end assertion. The tests are now independent of the user's private `.env`; `test_markets.py` passes 29/29 and `e2e_test.py` passes 32/32.
 
 ### Backtest result observed
 
@@ -520,14 +627,16 @@ This is not a real-market evaluation, but it confirms that profitability has not
 
 ### Not yet verified
 
-- real Pepperstone order placement through Python;
-- `demo_order_test.py` supervised open/close run;
-- broker order acceptance with actual volume/SL/TP requests;
-- MQL5 EA and indicator compilation;
-- EA execution, reversal and trailing behavior;
+- one more Windows safe pass after the latest classification changes;
+- the report showing zero strategy trades and one separate plumbing test;
+- MQL5 EA and indicator compilation in MetaEditor;
+- EA execution, reversal and trailing behavior on Pepperstone;
+- the corrected risk-manager behavior in a live terminal with trading disabled;
 - simultaneous-feed/data-fusion behavior;
 - other-platform connectivity outside the current MT5/futures providers;
 - slippage and live profitability.
+
+Already verified on Pepperstone demo: Python opened and closed a 0.01-lot XAUUSD position, the live position appeared and disappeared, and MT5 history showed both the opening and closing deals. The Python position-history and risk-history regression tests now pass in the local workspace.
 
 ---
 
@@ -569,7 +678,7 @@ TRADING_ENABLED=0
 Confirm that the exact MT5 Market Watch symbol is:
 
 ```text
-XAUUSD+
+XAUUSD
 ```
 
 ### Step 3 — Create a virtual environment
@@ -602,6 +711,9 @@ python test_indicators_golden.py
 python test_session_risk.py
 python test_key_rotation.py
 python test_news.py
+python test_python_execution.py
+python test_reports.py
+python test_mt5_history.py
 python e2e_test.py
 ```
 
@@ -612,7 +724,7 @@ The two known configuration-related failures described above may still appear un
 1. Open MetaTrader 5.
 2. Log in to a demo account.
 3. Open Market Watch.
-4. Add `XAUUSD+` if it is not visible.
+4. Add `XAUUSD` if it is not visible.
 5. Confirm that prices are updating.
 6. Confirm the MT5 terminal is the same installation used in the signal-file path.
 
@@ -690,20 +802,20 @@ When demo trading is eventually enabled:
 
 ## 9. Recommended next development tasks
 
-Priority order:
+Priority order after version 0.6.7:
 
-1. Clean the GitHub repository by removing `venv/`, `__pycache__/`, generated logs and unwanted generated data.
-2. Expand `.gitignore` beyond only `.env`.
-3. Fix the duplicate/inconsistent `DATA_SYMBOL` settings in `.env.example`.
-4. Fix `test_markets.py` and `e2e_test.py` so tests do not depend on a private `.env`.
-5. Add `EXECUTION_MODE=none|python|ea`.
-6. Make observation-only mode the default.
-7. Unify Python and EA position-sizing rules.
-8. Improve symbol validation and fail clearly if `XAUUSD+` is absent in MT5.
-9. Add broker-specific checks for volume step, minimum volume, stops level and filling mode.
-10. Add a test that proves the EA/Python duplicate-execution risk cannot occur.
-11. Record real demo data and backtest it with out-of-sample periods.
-12. Paper trade for multiple weeks before considering real money.
+1. Compile `GoldTradingEA.mq5` and `GoldSignalIndicator.mq5` in MetaEditor.
+2. Test EA-only mode separately; never run Python and EA as simultaneous order
+   executors.
+3. Observe the corrected risk-manager history path safely on demo; do not enable
+   trading until the risk output is understood.
+4. Supervise one natural Python strategy signal on demo using 0.01 lots only,
+   then return `TRADING_ENABLED=0` after verification.
+5. Verify SL/TP, close, reverse, cooldown, daily cap and report outcome behavior.
+6. Record real Pepperstone data and backtest with spread, commission, slippage,
+   drawdown, profit factor and out-of-sample periods.
+7. Preserve and improve the Rithmic/Databento futures and Level 3/MBO paths.
+8. Keep cTrader and other unrequested platforms out of the project.
 
 ---
 
@@ -740,6 +852,44 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 
 ## 11. Version history
 
+### 2026-08-27 — Version 0.6.7 — test data isolation
+
+- Isolated the end-to-end test's generated files in a temporary data/logs directory.
+- Confirmed the real runtime files remain unchanged after the test.
+- Full local validation remains 12/12 test files passed.
+- Windows safe validation completed: Pepperstone/XAUUSD data worked, Level 2 was live during the pass, one plumbing test was classified separately, and trading remained disabled.
+- No secrets were requested, stored or added. Trading remains disabled.
+
+### 2026-08-26 — Version 0.6.6 — reporting separation, risk-history fix and EA hardening
+
+- Added separate plumbing-test deal metadata and excluded those audit rows from strategy statistics without deleting the CSV.
+- Corrected outcome side display to use the original entry direction.
+- Updated the risk manager to use tracked strategy position queries and include commission/fees.
+- Hardened the MQL5 EA for hedging accounts and manual/other-EA position protection; MetaEditor compilation remains a user-side check.
+- Fixed environment-dependent market and end-to-end tests.
+- Added risk-history coverage and expanded local tests.
+- Full local validation: all 12 test files passed.
+- No secrets were requested, stored or added. Trading remains disabled for Windows verification.
+
+### 2026-08-26 — Version 0.6.5 — position-specific MT5 history reporting fix
+
+- Confirmed from the owner's Pepperstone terminal that `history_deals_get(position=86160935)` returns open deal `57028893` and close deal `57028912`.
+- Confirmed that the date-range query returns only a balance/deposit record for this terminal, so it cannot be the primary closed-trade lookup.
+- Added tracked bot position IDs and position-specific Step 5 history retrieval.
+- Added `position_id` metadata to successful Python execution results.
+- Added recovery from `demo_order_test_result.json` and prior executed decision rows.
+- Preserved deal-ID/signature de-duplication and rebuilt-outcome behavior when the CSV is empty.
+- Added `test_mt5_history.py` with 6/6 checks and included it in the local runner.
+- Added `test_risk_history.py` with 2/2 checks.
+- Separated explicit plumbing-test outcomes from strategy statistics without deleting the audit CSV.
+- Corrected future outcome side reporting to use the original entry direction.
+- Fixed environment-dependent `test_markets.py` and `e2e_test.py`; the full runner now passes all 12 local test files.
+- Updated `risk_manager.py` to use tracked strategy position history and include commission/fees.
+- Hardened the MQL5 EA for hedging accounts, manual-position protection, reversal failures, broker filling and fallback point units. MetaEditor compilation remains required.
+- Windows 0.6.5 validation completed with trading disabled: close deal `57028912` was imported once.
+- The owner chose to keep explicit plumbing-test outcomes separate from strategy performance; do not import position `86157466` into strategy metrics.
+- No secrets were requested, stored or added. Trading remains disabled.
+
 ### 2026-08-24 — Initial AI handoff
 
 - Reviewed the public GitHub repository.
@@ -760,6 +910,10 @@ After review, merge the branch into `main`. Do not commit `.env`, `venv`, passwo
 - Fixed MT5 market-book type mapping after Pepperstone diagnostic: MT5 type 1 is sell/ask and type 2 is buy/bid; the prior provider incorrectly treated type 0/other as the bid/ask split.
 - Confirmed Pepperstone MT5 XAUUSD provides 10 Level 2 book levels during diagnostic testing.
 - Corrected MT5 BookInfo mapping in the provider and read-only test: `type=2` is a buy/bid entry and `type=1` is a sell/ask entry. Added retries after book subscription so a populated Level 2 book is not falsely reported as empty. Local test suite remained fully green.
+- The first explicit demo-order script reported an apparent success but Pepperstone history showed no order; this was treated as unverified and fixed with post-send position/history verification in `demo_order_test.py`.
+- Pepperstone later showed the open and close deals in a wide history query: open deal `57028893`, close deal `57028912`, position `86160935`, close PnL `-0.11`. The verification utility was updated to query history by position ID and use a wide fallback, avoiding broker date-range behavior.
+- Monitoring history fallback was updated to use a wide broker-history query when a narrow date query returns no closed deals; persistent deal IDs/signatures prevent duplicates.
+- Added margin preflight and `order_check()` so an insufficient-margin order is rejected before `order_send()`.
 
 ---
 
@@ -777,15 +931,17 @@ Please read gold_trading_system_mt5/AI_HANDOFF.md first.
 The current broker test is Pepperstone Limited, server PepperstoneUK-Demo, using the exact symbol XAUUSD and terminal64.exe at:
 C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe
 
-The package supports `EXECUTION_MODE=none|python|ea`; the owner's first supervised execution path is Python. The safe starting settings are `EXECUTION_MODE=none` and `TRADING_ENABLED=0`. Never request or expose API keys, passwords or private credentials.
+The package supports `EXECUTION_MODE=none|python|ea`; the owner's first supervised execution path is Python. The safe starting settings are `EXECUTION_MODE=python` and `TRADING_ENABLED=0`. Never request or expose API keys, passwords or private credentials.
 
 Current validated facts:
-1. Pepperstone MT5 connection works.
-2. Pepperstone XAUUSD provided 10 Level 2 book levels in the diagnostic and the corrected main provider now maps them to bid/ask correctly.
-3. The local safe test runner passes all 9 test files, including Python execution tests and the end-to-end mock test.
-4. MT5 CFD data has no Level 3 events; quote tick last/volume may be zero, so some CVD/footprint values are estimated.
-5. Real Pepperstone order acceptance, MQL5 compilation and EA behavior are not yet verified.
-6. The current modern Gemini client has a configurable request timeout; keep the latest timeout behavior documented by the current source.
+1. Pepperstone MT5 connection works for the exact symbol `XAUUSD`.
+2. Pepperstone XAUUSD previously provided 10 Level 2 book levels; at the later daily break the diagnostic showed zero levels, so the feed must be treated as time-dependent.
+3. Position-specific `history_deals_get(position=86160935)` returned open deal `57028893` and close deal `57028912` with `last_error=(1, 'Success')`.
+4. Pepperstone date-range history returned only a balance/deposit record during this investigation; version 0.6.7 tracks strategy position IDs and queries by position for reporting and risk checks.
+5. The full 0.6.7 local runner passes all 12 test files, including position-history reporting, risk-history, plumbing classification and test-isolation checks.
+6. MT5 CFD data has no Level 3 events; quote tick last/volume may be zero, so some CVD/footprint values are estimated.
+7. MQL5 compilation and EA behavior are not yet verified.
+8. The current modern Gemini client has a configurable request timeout; keep the latest timeout behavior documented by the current source.
 
 First ask me for the latest git commit, the current sanitized `.env` configuration, and the latest safe test output if they are not already available. Preserve and update this handoff after every version improvement. Do not delete or move files without explaining why and asking first.
 ```

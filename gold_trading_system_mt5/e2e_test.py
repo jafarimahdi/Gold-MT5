@@ -77,11 +77,29 @@ def _symbol_info_tick(symbol):
 
 
 def _account_info():
-    return SimpleNamespace(equity=10000.0)
+    return SimpleNamespace(equity=10000.0, margin_free=10000.0)
+
+
+def _order_calc_margin(order_type, symbol, volume, price):
+    return float(volume) * 100.0
+
+
+def _order_check(request):
+    return SimpleNamespace(retcode=0)
 
 
 def _order_send(request):
-    return SimpleNamespace(retcode=10009, order=123456)
+    order_id = 123456
+    if "position" in request:
+        fake_positions[:] = [p for p in fake_positions
+                             if getattr(p, "ticket", None) != request["position"]]
+    else:
+        fake_positions.append(SimpleNamespace(
+            ticket=order_id, symbol=request["symbol"], type=request["type"],
+            volume=request["volume"], magic=request["magic"],
+            price_open=request.get("price", 0.0), sl=request.get("sl", 0.0),
+            tp=request.get("tp", 0.0), profit=0.0))
+    return SimpleNamespace(retcode=10009, order=order_id, deal=654321)
 
 
 fake_positions = []
@@ -146,6 +164,8 @@ fake_mt5.shutdown = _shutdown
 fake_mt5.symbol_info_tick = _symbol_info_tick
 fake_mt5.symbol_info = _symbol_info
 fake_mt5.account_info = _account_info
+fake_mt5.order_calc_margin = _order_calc_margin
+fake_mt5.order_check = _order_check
 fake_mt5.order_send = _order_send
 fake_mt5.positions_get = _positions_get
 # The real monitor/risk code queries closed deals. Include an empty mocked
@@ -246,8 +266,12 @@ def main():
     warn_snap = analyze_market(_synthetic_market_data(event_minutes=25))
     check("NEWS: warning detected (25 min before event)",
           warn_snap.news.news_state == "WARNING")
+    # Each scenario is independent; clear the prior mock position so the
+    # idempotence guard does not turn the warning test into a duplicate entry.
+    fake_positions.clear()
     rw = MT5Executor().execute(Decision("BUY", 95.0, "warning entry"), warn_snap)
     check("NEWS: entry still allowed during warning", rw.status == "EXECUTED")
+    fake_positions.clear()
     r_quiet = MT5Executor().execute(Decision("BUY", 95.0, "quiet entry"), snap)
     check("NEWS: stop widened during warning",
           (rw.price - rw.sl) > (r_quiet.price - r_quiet.sl))
@@ -284,27 +308,74 @@ def main():
     check("STEP5: loop ran 2 iterations", counter["n"] == 2)
 
     # ---- full main.py orchestration with mocks ----------------------------
+    # Isolate every generated file from the user's real data/, logs/ and
+    # trade-guard state. Running this test must never alter a live report.
     import main as main_mod
-    # reset the anti-overtrading state so this test is repeatable
+    import maintenance
+    import trade_guard
+    import tempfile
+    from pathlib import Path
+
+    isolated = Path(tempfile.mkdtemp(prefix="gold-e2e-"))
+    isolated_data = isolated / "data"
+    isolated_logs = isolated / "logs"
+    isolated_data.mkdir()
+    isolated_logs.mkdir()
+    old_config_data = config.DATA_DIR
+    old_config_logs = config.LOGS_DIR
+    old_main_data = main_mod.DATA_DIR
+    old_main_logs = main_mod.LOGS_DIR
+    old_lock = main_mod._LOCK_FILE
+    old_ai_state = main_mod._AI_STATE_FILE
+    old_outcome_keys = main_mod._OUTCOME_KEYS_FILE
+    old_position_ids = main_mod._POSITION_IDS_FILE
+    old_plumbing_deals = main_mod._PLUMBING_DEALS_FILE
+    old_guard_state = trade_guard.STATE_FILE
+    old_maintenance_state = maintenance._STATE_FILE
+    _orig_reload = config.reload_env
+
+    config.DATA_DIR = isolated_data
+    config.LOGS_DIR = isolated_logs
+    main_mod.DATA_DIR = isolated_data
+    main_mod.LOGS_DIR = isolated_logs
+    main_mod._LOCK_FILE = None
+    main_mod._AI_STATE_FILE = None
+    main_mod._OUTCOME_KEYS_FILE = isolated_data / "logged_outcome_deals.json"
+    main_mod._POSITION_IDS_FILE = isolated_data / "tracked_bot_positions.json"
+    main_mod._PLUMBING_DEALS_FILE = isolated_data / "plumbing_test_deals.json"
+    trade_guard.STATE_FILE = isolated_data / "trade_guard_state.json"
+    maintenance._STATE_FILE = isolated_data / "maintenance_state.json"
+
     try:
         from trade_guard import TradeGuard
         TradeGuard().reset()
-    except Exception:
-        pass
-    # disable the AI throttle so the full pipeline exercises the Gemini path.
-    # (reload_env() re-reads .env, which would override these, so we neutralise
-    # it for this test run.)
-    config.AI_MIN_SIGNAL_STRENGTH = 0.0
-    config.AI_MIN_INTERVAL_MINUTES = 0
-    main_mod._LAST_AI_CALL = 0.0
-    import step2_market_analysis as _s2  # noqa: F401  (keep import surface)
-    _orig_reload = config.reload_env
-    config.reload_env = lambda: None
-    main_mod.setup_logging()
-    try:
+        # disable the AI throttle so the full pipeline exercises the Gemini path.
+        config.AI_MIN_SIGNAL_STRENGTH = 0.0
+        config.AI_MIN_INTERVAL_MINUTES = 0
+        main_mod._LAST_AI_CALL = 0.0
+        # Make the main-pipeline assertion independent of the caller's .env.
+        config.DATA_SOURCE = "mt5"
+        config.MT5_SYMBOL = "XAUUSD"
+        import step2_market_analysis as _s2  # noqa: F401  (keep import surface)
+        _orig_reload = config.reload_env
+        config.reload_env = lambda: None
+        main_mod.setup_logging()
         main_mod.run_pipeline()
     finally:
         config.reload_env = _orig_reload
+        config.DATA_DIR = old_config_data
+        config.LOGS_DIR = old_config_logs
+        main_mod.DATA_DIR = old_main_data
+        main_mod.LOGS_DIR = old_main_logs
+        main_mod._LOCK_FILE = old_lock
+        main_mod._AI_STATE_FILE = old_ai_state
+        main_mod._OUTCOME_KEYS_FILE = old_outcome_keys
+        main_mod._POSITION_IDS_FILE = old_position_ids
+        main_mod._PLUMBING_DEALS_FILE = old_plumbing_deals
+        trade_guard.STATE_FILE = old_guard_state
+        maintenance._STATE_FILE = old_maintenance_state
+        import shutil
+        shutil.rmtree(isolated, ignore_errors=True)
     # STATUS holds (label, status) tuples; key on the short step name.
     statuses = {s.split("  ")[0].strip(): st for s, st in main_mod.STATUS}
     check("MAIN: step1 OK", statuses.get("STEP 1", "").startswith("OK (mt5"))

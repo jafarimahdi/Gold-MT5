@@ -18,6 +18,7 @@ pipeline; when MT5 is present it reads real deal history.
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,85 @@ import config
 logger = logging.getLogger(__name__)
 
 STATE_FILE = config.DATA_DIR / "risk_state.json"
+POSITION_IDS_FILE = config.DATA_DIR / "tracked_bot_positions.json"
+PLUMBING_DEALS_FILE = config.DATA_DIR / "plumbing_test_deals.json"
+
+
+def _positive_id(value):
+    try:
+        number = int(value)
+        return number if number > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _plumbing_position_ids() -> set:
+    """Return explicit plumbing-test positions excluded from risk PnL."""
+    ids = set()
+    for path in (
+        config.DATA_DIR / "demo_order_test_result.json",
+        PLUMBING_DEALS_FILE,
+    ):
+        try:
+            if not path.exists():
+                continue
+            state = json.loads(path.read_text(encoding="utf-8"))
+            values = state.get("position_ids", []) if "result" in path.name else [
+                row.get("position_id") for row in state.get("deals", []) or []
+            ]
+            for value in values or []:
+                number = _positive_id(value)
+                if number:
+                    ids.add(number)
+        except (json.JSONDecodeError, OSError, AttributeError):
+            continue
+    return ids
+
+
+def _tracked_strategy_position_ids() -> set:
+    """Load persisted strategy positions, excluding plumbing tests."""
+    ids = set()
+    excluded = _plumbing_position_ids()
+    try:
+        if POSITION_IDS_FILE.exists():
+            state = json.loads(POSITION_IDS_FILE.read_text(encoding="utf-8"))
+            for value in state.get("position_ids", []) or []:
+                number = _positive_id(value)
+                if number and number not in excluded:
+                    ids.add(number)
+    except (json.JSONDecodeError, OSError, AttributeError):
+        pass
+
+    # Compatibility for positions created before tracked_bot_positions.json.
+    decisions = config.DATA_DIR / "decisions_log.csv"
+    try:
+        if decisions.exists():
+            with open(decisions, "r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    if (row.get("exec_status") or "").strip() != "EXECUTED":
+                        continue
+                    number = _positive_id(row.get("order_id"))
+                    if number and number not in excluded:
+                        ids.add(number)
+    except (OSError, csv.Error):
+        pass
+    return ids
+
+
+def _deal_value(deal) -> float:
+    return sum(float(getattr(deal, name, 0.0) or 0.0)
+               for name in ("profit", "swap", "commission", "fee"))
+
+
+def _deal_timestamp(deal):
+    raw = getattr(deal, "time_msc", None) or getattr(deal, "time", None)
+    try:
+        value = float(raw)
+        if value > 1e12:
+            value /= 1000.0
+        return value
+    except (TypeError, ValueError):
+        return None
 
 
 def _now() -> datetime:
@@ -92,7 +172,13 @@ class RiskManager:
         return config.ACCOUNT_EQUITY
 
     def daily_pnl(self, now: Optional[datetime] = None) -> float:
-        """Realised PnL for today (profit + swap + commission), MT5 history."""
+        """Today's realised bot PnL, using position-specific MT5 history.
+
+        Pepperstone can omit XAUUSD trades from date-range history while still
+        returning them from ``history_deals_get(position=...)``. Strategy
+        position IDs persisted by main.py are therefore the primary source.
+        The date-range query remains a limited compatibility fallback only.
+        """
         if mt5 is None:
             return 0.0
         now = now or _now()
@@ -100,21 +186,48 @@ class RiskManager:
         try:
             if not config.mt5_initialize(mt5):
                 return 0.0
-            deals = mt5.history_deals_get(day_start, now)
-            mt5.shutdown()
-            total = 0.0
-            for d in deals or []:
-                total += float(getattr(d, "profit", 0.0) or 0.0)
-                total += float(getattr(d, "swap", 0.0) or 0.0)
-                total += float(getattr(d, "commission", 0.0) or 0.0)
-            return total
+
+            tracked = _tracked_strategy_position_ids()
+            if tracked:
+                unique = {}
+                for position_id in sorted(tracked):
+                    try:
+                        deals = mt5.history_deals_get(
+                            position=int(position_id)) or []
+                    except (TypeError, ValueError):
+                        continue
+                    for deal in deals:
+                        deal_id = getattr(deal, "ticket", None)
+                        key = (deal_id if deal_id not in (None, "", 0)
+                               else (position_id, getattr(deal, "time_msc",
+                                                          getattr(deal, "time", ""))))
+                        deal_ts = _deal_timestamp(deal)
+                        if deal_ts is not None and (
+                                deal_ts < day_start.timestamp()
+                                or deal_ts > now.timestamp()):
+                            continue
+                        unique[key] = deal
+                if unique:
+                    return sum(_deal_value(deal) for deal in unique.values())
+
+            # Compatibility fallback for a fresh installation with no tracked
+            # position IDs. Filter out balance/deposit records by symbol and
+            # bot magic. Do not use a future wide end date: this terminal
+            # returns an empty result for that form.
+            deals = mt5.history_deals_get(day_start, now) or []
+            return sum(
+                _deal_value(deal) for deal in deals
+                if getattr(deal, "symbol", "") == config.MT5_SYMBOL
+                and int(getattr(deal, "magic", -1) or -1) == 234000
+            )
         except Exception as exc:
             logger.warning("Risk manager could not read MT5 history: %s", exc)
+            return 0.0
+        finally:
             try:
                 mt5.shutdown()
             except Exception:
                 pass
-            return 0.0
 
     # -- main check ------------------------------------------------------------
     def check(self, equity: Optional[float] = None,

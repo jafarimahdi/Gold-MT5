@@ -61,8 +61,10 @@ gold_trading_system/
 ├── test_session_risk.py         # weekend/no-data/risk resilience (25 checks)
 ├── test_key_rotation.py         # safe multi-key fallback (9 checks)
 ├── test_news.py                 # news caching/enrichment tests (11 checks)
-├── test_python_execution.py     # Python execution/position tests (16 checks)
+├── test_python_execution.py     # Python execution/position tests (18 checks)
 ├── test_reports.py              # report de-duplication test
+├── test_mt5_history.py          # position-specific MT5 history test (6 checks)
+├── test_risk_history.py          # risk PnL history test (2 checks)
 ├── deduplicate_trade_outcomes.py # inspect/clean old duplicate outcomes
 ├── run_all_tests.py             # one command for all safe local tests
 ├── e2e_test.py                  # full pipeline integration tests
@@ -117,6 +119,8 @@ python test_key_rotation.py
 python test_news.py
 python test_python_execution.py
 python test_reports.py
+python test_mt5_history.py
+python test_risk_history.py
 python e2e_test.py
 
 # Explicit demo broker plumbing test (ONLY with confirmation, not a strategy test)

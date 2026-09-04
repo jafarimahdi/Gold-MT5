@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
 try:
     import MetaTrader5 as mt5
@@ -61,50 +61,115 @@ class TradeMonitor:
             return []
 
     # ------------------------------------------------------------------ #
-    def check_closed_deals(self, since: Optional[datetime] = None) -> List[dict]:
-        """Return today's closed deals (for PnL logging / risk tracking).
+    @staticmethod
+    def _deal_rows(deals: Iterable, position_ids: Optional[set] = None) -> List[dict]:
+        """Convert MT5 deal objects to close-deal rows without duplicates."""
+        out = []
+        seen = set()
+        position_ids = position_ids or set()
+        opening_sides = {}
+        for opening in deals or []:
+            if getattr(opening, "entry", None) in (0, 2):
+                opening_position = getattr(
+                    opening, "position_id", getattr(opening, "ticket", None))
+                opening_sides[opening_position] = (
+                    "BUY" if getattr(opening, "type", 1) == 0 else "SELL")
+        for d in deals or []:
+            entry = getattr(d, "entry", None)
+            if entry != 1:            # DEAL_ENTRY_OUT == 1
+                continue
+            deal_id = getattr(d, "ticket", None)
+            position_id = getattr(d, "position_id", getattr(d, "ticket", None))
+            # A position-specific query is already scoped to the bot's known
+            # position. The extra magic/position check protects date fallbacks.
+            magic = getattr(d, "magic", None)
+            if position_ids and position_id not in position_ids and magic != 234000:
+                continue
+            unique_key = deal_id if deal_id not in (None, "", 0) else (
+                position_id, getattr(d, "symbol", ""), entry,
+                getattr(d, "time_msc", getattr(d, "time", "")))
+            if unique_key in seen:
+                continue
+            seen.add(unique_key)
+            closing_side = "BUY" if getattr(d, "type", 1) == 0 else "SELL"
+            out.append({
+                # `ticket` is the unique MT5 deal ID. Keep it separate
+                # from position_id because one position can have more
+                # than one deal (partial closes, reversals, etc.).
+                "deal_id": deal_id,
+                "position_id": position_id,
+                "symbol": getattr(d, "symbol", ""),
+                # `side` is the original entry direction. `type` remains the
+                # actual closing transaction side for compatibility/debugging.
+                "side": opening_sides.get(position_id, closing_side),
+                "type": closing_side,
+                "price": float(getattr(d, "price", 0.0) or 0.0),
+                "pnl": round(float(getattr(d, "profit", 0.0) or 0.0)
+                             + float(getattr(d, "swap", 0.0) or 0.0)
+                             + float(getattr(d, "commission", 0.0) or 0.0), 2),
+            })
+        return out
 
-        Empty when MT5 is unavailable — never raises.
+    def check_closed_deals(self, since: Optional[datetime] = None,
+                           position_ids: Optional[Iterable[int]] = None) -> List[dict]:
+        """Return closed bot deals for tracked positions.
+
+        Pepperstone's date-range history query can return balance records while
+        omitting the XAUUSD trade deals. When position IDs are known, query MT5
+        by position instead; this is the verified working method. The date
+        query remains only as a compatibility fallback when no IDs are known.
         """
         if mt5 is None:
             return []
-        since = since or datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0)
+        tracked = set()
+        for value in position_ids or []:
+            try:
+                number = int(value)
+                if number > 0:
+                    tracked.add(number)
+            except (TypeError, ValueError):
+                continue
         try:
             if not config.mt5_initialize(mt5):
                 return []
-            deals = mt5.history_deals_get(since, datetime.now(timezone.utc))
-            mt5.shutdown()
-            out = []
-            for d in deals or []:
-                entry = getattr(d, "entry", None)
-                if entry != 1:            # DEAL_ENTRY_OUT == 1
-                    continue
-                out.append({
-                    # `ticket` is the unique MT5 deal ID. Keep it separate
-                    # from position_id because one position can have more
-                    # than one deal (partial closes, reversals, etc.).
-                    "deal_id": getattr(d, "ticket", None),
-                    "position_id": getattr(d, "position_id", getattr(d, "ticket", None)),
-                    "symbol": getattr(d, "symbol", ""),
-                    "type": "BUY" if getattr(d, "type", 1) == 0 else "SELL",
-                    "price": float(getattr(d, "price", 0.0) or 0.0),
-                    "pnl": round(float(getattr(d, "profit", 0.0) or 0.0)
-                                 + float(getattr(d, "swap", 0.0) or 0.0)
-                                 + float(getattr(d, "commission", 0.0) or 0.0), 2),
-                })
-            return out
+
+            if tracked:
+                # This is the reliable Pepperstone path: the user's verified
+                # position 86160935 returns both deal 57028893 and deal
+                # 57028912 when queried with position=86160935.
+                deals = []
+                for position_id in sorted(tracked):
+                    try:
+                        deals.extend(mt5.history_deals_get(
+                            position=position_id) or [])
+                    except (TypeError, ValueError):
+                        # Older MT5 Python builds may not support the keyword;
+                        # the normal date fallback below remains available.
+                        continue
+                rows = self._deal_rows(deals, tracked)
+                if rows or deals:
+                    return rows
+
+            since = since or datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0)
+            now = datetime.now(timezone.utc)
+            deals = mt5.history_deals_get(since, now) or []
+            # Do not use a future end date (such as 2100-01-01): this broker
+            # terminal returns no deals for that wide range. A date fallback
+            # is retained only for callers with no tracked position IDs.
+            return self._deal_rows(deals)
         except Exception as exc:
             logger.warning("STEP 5: closed-deal query failed: %s", exc)
+            return []
+        finally:
             try:
                 mt5.shutdown()
             except Exception:
                 pass
-            return []
 
     # ------------------------------------------------------------------ #
-    def single_pass(self) -> None:
-        """One monitoring pass (used by main.py)."""
+    def single_pass(self) -> List[dict]:
+        """One monitoring pass (used by main.py); return open positions."""
         positions = self.check_open_trades()
         if positions:
             for p in positions:
@@ -113,6 +178,7 @@ class TradeMonitor:
                             p["price_open"], p["profit"])
         else:
             logger.info("STEP 5: no open trades.")
+        return positions
 
     # ------------------------------------------------------------------ #
     def run_loop(self, pipeline_fn: Callable[[], None],

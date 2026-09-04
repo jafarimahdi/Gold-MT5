@@ -24,6 +24,8 @@ TESTS = [
     "test_news.py",
     "test_python_execution.py",
     "test_reports.py",
+    "test_mt5_history.py",
+    "test_risk_history.py",
     "e2e_test.py",
 ]
 

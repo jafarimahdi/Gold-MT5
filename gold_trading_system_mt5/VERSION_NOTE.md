@@ -1,4 +1,4 @@
-# VERSION NOTE — MT5-data version (0.6.0)
+# VERSION NOTE — MT5-data version (0.6.7)
 
 This folder is the Pepperstone/MT5-ready foundation. The exact Pepperstone
 symbol is detected locally; do not put broker credentials in Git.
@@ -17,7 +17,7 @@ There are TWO copies of the Gold Trading System:
 |------|-----|-------|
 | Price / bid / ask | ✅ | from your broker |
 | Ticks with buy/sell side | ✅ | via tick flags (32=buy, 64=sell) |
-| Level 2 depth | Depends on broker | Vantage test returned no book levels |
+| Level 2 depth | Depends on broker | Pepperstone XAUUSD previously returned 10 levels; the feed may be empty during the daily break |
 | OHLCV candles | ✅ | any timeframe |
 | **Level 3 (order events)** | ❌ in MT5 | brokers do NOT provide individual order events |
 

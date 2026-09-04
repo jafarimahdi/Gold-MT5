@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -44,6 +45,8 @@ class ExecutionResult:
     status: str                 # "EXECUTED" | "DEFERRED" | "SKIPPED" | "ERROR" | "PENDING"
     reason: str = ""
     order_id: Optional[int] = None
+    deal_id: Optional[int] = None
+    position_id: Optional[int] = None
     symbol: str = config.SYMBOL
     volume: float = 0.0
     price: float = 0.0
@@ -207,6 +210,27 @@ class MT5Executor:
             if int(getattr(p, "magic", -1) or -1) == int(self.magic)
         ]
 
+    def _wait_for_bot_position(self, order_id: Optional[int] = None,
+                               timeout: Optional[float] = None):
+        """Wait briefly for MT5 to expose the newly opened bot position."""
+        timeout = (config.EXECUTION_VERIFY_SECONDS if timeout is None else timeout)
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        last_error = None
+        while True:
+            try:
+                positions = self._bot_positions()
+                for position in positions:
+                    ticket = getattr(position, "ticket", None)
+                    if order_id is None or ticket == order_id or positions:
+                        return position
+            except Exception as exc:
+                last_error = str(exc)
+            if time.monotonic() >= deadline:
+                if last_error:
+                    logger.warning("STEP 4: position verification failed: %s", last_error)
+                return None
+            time.sleep(0.2)
+
     def _close_position(self, position) -> tuple:
         """Close one bot position and return (ok, reason)."""
         tick = mt5.symbol_info_tick(self.symbol)
@@ -320,6 +344,27 @@ class MT5Executor:
             return getattr(mt5, "ORDER_FILLING_FOK", 0)
         return getattr(mt5, "ORDER_FILLING_RETURN", 2)
 
+    def _validate_margin(self, action: str, volume: float,
+                         price: float) -> Optional[str]:
+        """Check required margin before attempting to send an order."""
+        account = mt5.account_info()
+        calculator = getattr(mt5, "order_calc_margin", None)
+        if account is None or not callable(calculator):
+            return "account margin information unavailable"
+        free_margin = getattr(account, "margin_free", None)
+        if free_margin is None:
+            return "account free margin unavailable"
+        order_type = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
+        required = calculator(order_type, self.symbol, volume, price)
+        if required is None:
+            return f"margin calculation failed: {mt5.last_error()}"
+        required = float(required)
+        free_margin = float(free_margin)
+        if required > free_margin:
+            return (f"insufficient free margin: need {required:.2f}, "
+                    f"available {free_margin:.2f}")
+        return None
+
     def _place_order(self, action: str, snapshot,
                      news_state: str) -> ExecutionResult:
         """Send a market order with SL/TP. (Runs only when MT5 is available.)"""
@@ -412,6 +457,33 @@ class MT5Executor:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._select_filling_mode(info),
         }
+
+        margin_error = self._validate_margin(action, lot_size, price)
+        if margin_error:
+            logger.error("STEP 4: %s", margin_error)
+            return ExecutionResult(status="ERROR", reason=margin_error,
+                                   symbol=self.symbol, volume=lot_size,
+                                   price=price, sl=sl, tp=tp, timestamp=now)
+
+        # Ask MT5 to validate the request before the actual send. This is a
+        # preflight check only; it does not create an order.
+        order_check = getattr(mt5, "order_check", None)
+        if callable(order_check):
+            checked = order_check(request)
+            if checked is None:
+                reason = f"order_check returned no result: {mt5.last_error()}"
+                logger.error("STEP 4: %s", reason)
+                return ExecutionResult(status="ERROR", reason=reason,
+                                       symbol=self.symbol, volume=lot_size,
+                                       price=price, sl=sl, tp=tp, timestamp=now)
+            check_code = getattr(checked, "retcode", 0)
+            if check_code not in (0, getattr(mt5, "TRADE_RETCODE_DONE", 10009)):
+                reason = f"order_check retcode={check_code}"
+                logger.error("STEP 4: %s", reason)
+                return ExecutionResult(status="ERROR", reason=reason,
+                                       symbol=self.symbol, volume=lot_size,
+                                       price=price, sl=sl, tp=tp, timestamp=now)
+
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             logger.error("STEP 4: order_send failed retcode=%s",
@@ -421,12 +493,27 @@ class MT5Executor:
                                    symbol=self.symbol, volume=lot_size,
                                    price=price, sl=sl, tp=tp, timestamp=now)
 
+        order_id = getattr(result, "order", None)
+        deal_id = getattr(result, "deal", None)
+        verified_position = self._wait_for_bot_position(order_id=order_id)
+        if verified_position is None:
+            reason = (f"order reported success but bot position was not found "
+                      f"within {config.EXECUTION_VERIFY_SECONDS}s")
+            logger.error("STEP 4: %s", reason)
+            return ExecutionResult(status="ERROR", reason=reason,
+                                   order_id=order_id, deal_id=deal_id,
+                                   symbol=self.symbol, volume=lot_size,
+                                   price=price, sl=sl, tp=tp, timestamp=now)
+
         logger.info("STEP 4: EXECUTED %s %s %.2f lots @ %.2f (SL %.2f / TP %.2f) "
-                    "order=%s", action, self.symbol, lot_size, price, sl, tp,
-                    result.order)
-        return ExecutionResult(status="EXECUTED", order_id=result.order,
-                               symbol=self.symbol, volume=lot_size,
-                               price=price, sl=sl, tp=tp, timestamp=now)
+                    "order=%s deal=%s position=%s", action, self.symbol,
+                    lot_size, price, sl, tp, order_id, deal_id,
+                    getattr(verified_position, "ticket", None))
+        return ExecutionResult(status="EXECUTED", order_id=order_id,
+                               deal_id=deal_id,
+                               position_id=getattr(verified_position, "ticket", None),
+                               symbol=self.symbol, volume=lot_size, price=price,
+                               sl=sl, tp=tp, timestamp=now)
 
 
 def np_round2(value: float) -> float:

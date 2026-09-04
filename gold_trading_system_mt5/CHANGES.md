@@ -3,13 +3,14 @@
 This document lists every change made to improve the accuracy of the gold
 market analysis and the behaviour of the robot around news events.
 
-All changes verified: the current foundation test suite runs through
-`run_all_tests.py` with all 9 local test files passing in the development
-workspace. Live broker and MQL5 checks remain Windows-side tests.
+The latest 0.6.6 reporting, risk-history and EA-hardening change has dedicated tests and does not
+alter order placement. The full workspace runner still has two baseline test
+failures documented in `AI_HANDOFF.md`. Live broker and MQL5 checks remain
+Windows-side tests.
 
 ---
 
-## 0. Version 0.6.0 — Pepperstone-ready Python execution foundation
+## 0. Version 0.6.4 — Pepperstone-ready Python execution foundation
 
 - Added Python position management: duplicate same-direction protection,
   close-opposite-and-reverse behavior, and manual-position protection.
@@ -23,6 +24,12 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
   estimated candle flow and unavailable Level 3.
 - Added the explicitly confirmed `demo_order_test.py` to validate one small
   Pepperstone open/close cycle without using Gemini or the EA.
+- Added required-margin preflight and MT5 `order_check()` before `order_send()`;
+  insufficient free margin is now reported before an order attempt.
+- Demo-order verification now confirms that a position appears, closes and
+  creates visible MT5 history deals before reporting success.
+- Monitoring falls back to a wide MT5 history query when broker date ranges
+  hide recent deals; deal-ID/signature de-duplication prevents repeats.
 - Preferred the supported `google-genai` SDK while keeping a temporary legacy
   fallback for existing installations.
 - Added configurable modern Gemini request timeout and disabled unused
@@ -30,6 +37,51 @@ workspace. Live broker and MQL5 checks remain Windows-side tests.
 - Added Pepperstone setup documentation.
 - Preserved futures/Rithmic/Databento providers; other platforms and simultaneous
   MT5/futures fusion are outside this release.
+
+## 0.6.7 — Test data isolation
+
+- Isolates the end-to-end test's data, logs, signal, risk and trade-guard files
+  in a temporary directory.
+- Confirms the real runtime files remain unchanged after the test.
+- Full local validation passes all 12 test files.
+
+## 0.6.6 — Reporting separation, risk-history fix and EA hardening
+
+- Separates explicit plumbing-test outcomes from strategy performance while
+  preserving the original audit CSV.
+- Corrects outcome-side reporting to use the original entry direction.
+- Updates the risk manager to use tracked strategy position history and include
+  commission and fees without the invalid future-date fallback.
+- Hardens the MQL5 EA for hedging accounts, manual/other-EA protection, failed
+  reversals, broker filling mode and point-based fallback stops.
+- Makes market and end-to-end tests independent of a private `.env`.
+- Adds risk-history coverage and keeps all 12 local test files passing.
+
+## 0.6.5 — Position-specific MT5 history reporting fix
+
+- Confirmed on Pepperstone that `history_deals_get(position=86160935)` returns
+  both the open deal `57028893` and close deal `57028912`.
+- Added position-specific closed-deal retrieval to `step5_monitoring.py`.
+- Persisted tracked bot position IDs across restarts so a later pass can find
+  the close deal after the live position disappears.
+- Preserved unique deal-ID/signature de-duplication.
+- Added recovery from the verified demo-order result and prior executed rows,
+  allowing the already-confirmed demo test to be imported without another order.
+- Added `test_mt5_history.py` with 5/5 checks and included it in
+  `run_all_tests.py`.
+- Did not change order direction, sizing, SL/TP, or the trading switch.
+- Updated `risk_manager.py` to use tracked strategy position history, include
+  commissions/fees, exclude explicit plumbing tests and remove the invalid
+  future-date fallback.
+- Classified explicit plumbing-test deals separately in `robot_report.py` while
+  preserving the original audit CSV.
+- Corrected future outcome side reporting to use the original entry direction.
+- Hardened the MQL5 EA for hedging accounts: it protects manual/other-EA
+  positions, closes all bot positions before reversal, checks order results,
+  sets broker filling mode and interprets fallback SL/TP as points.
+- Added `test_risk_history.py`; fixed environment-dependent baseline tests.
+- Did not alter the active trading settings; Windows operation must remain on
+  `TRADING_ENABLED=0` until supervised approval.
 
 ---
 

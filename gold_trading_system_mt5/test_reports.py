@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from robot_report import _dedupe_outcomes
+from robot_report import _dedupe_outcomes, _split_outcomes
 
 
 def main() -> int:
@@ -22,15 +22,19 @@ def main() -> int:
          "pnl": "-0.5", "exit_price": "2002"},
     ]
     clean = _dedupe_outcomes(rows)
-    ok = len(clean) == 2
+    strategy, plumbing = _split_outcomes(
+        clean, {"10"})
+    ok_dedupe = len(clean) == 2
+    ok_split = len(strategy) == 1 and len(plumbing) == 1
     print("=" * 64)
-    print("REPORT DEDUPLICATION TEST RESULTS")
+    print("REPORT DEDUPLICATION / CLASSIFICATION TEST RESULTS")
     print("=" * 64)
-    print(f"  {'PASS' if ok else 'FAIL'}  duplicate outcome is counted once")
+    print(f"  {'PASS' if ok_dedupe else 'FAIL'}  duplicate outcome is counted once")
+    print(f"  {'PASS' if ok_split else 'FAIL'}  plumbing outcome is separate")
     print("-" * 64)
-    print(f"  {1 if ok else 0}/1 checks passed")
+    print(f"  {int(ok_dedupe) + int(ok_split)}/2 checks passed")
     print("=" * 64)
-    return 0 if ok else 1
+    return 0 if ok_dedupe and ok_split else 1
 
 
 if __name__ == "__main__":

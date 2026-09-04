@@ -91,11 +91,12 @@ Then run exactly one side with explicit confirmation:
 python demo_order_test.py --side BUY --confirm-demo-order
 ```
 
-The script opens at most the configured maximum volume, waits five seconds and
-attempts to close only the bot-owned position. It does not use Gemini and is
-not a strategy recommendation. If the open request fails, no close is
-attempted. If interrupted after opening, close the bot position manually in
-MT5.
+The script opens at most the configured maximum volume, verifies that a
+bot-owned position appears in MT5, waits five seconds and attempts to close
+only that position. It then verifies that the position disappears and that the
+open/close deals are visible in MT5 history. It does not use Gemini and is not
+a strategy recommendation. If any verification fails, it reports failure. If
+interrupted after opening, close the bot position manually in MT5.
 
 Afterward immediately set:
 

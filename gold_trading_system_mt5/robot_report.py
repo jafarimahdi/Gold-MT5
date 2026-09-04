@@ -71,6 +71,47 @@ def _dedupe_outcomes(rows: list) -> list:
     return out
 
 
+def _plumbing_test_records(path: Path = DATA / "plumbing_test_deals.json") -> dict:
+    """Return plumbing-test metadata keyed by close-deal ID."""
+    if not path.exists():
+        return {}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        records = {}
+        for row in state.get("deals", []) or []:
+            if not isinstance(row, dict):
+                continue
+            value = row.get("deal_id")
+            if value not in (None, "", 0):
+                records[str(value)] = row
+        return records
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return {}
+
+
+def _plumbing_test_deal_ids(path: Path = DATA / "plumbing_test_deals.json") -> set:
+    """Return close-deal IDs belonging to explicit broker plumbing tests."""
+    return set(_plumbing_test_records(path))
+
+
+def _split_outcomes(rows: list, plumbing_ids: set | None = None) -> tuple[list, list]:
+    """Split audit outcomes into strategy and explicit plumbing-test rows."""
+    plumbing_ids = {str(value) for value in (plumbing_ids or set())}
+    strategy, plumbing = [], []
+    for row in rows:
+        comment = (row.get("comment") or "").strip().lower()
+        is_plumbing = (
+            str(row.get("order_id", "")).strip() in plumbing_ids
+            or "plumbing test" in comment
+            or "demo order test" in comment
+        )
+        if is_plumbing:
+            plumbing.append(row)
+        else:
+            strategy.append(row)
+    return strategy, plumbing
+
+
 def _recent(rows: list, days: int) -> list:
     """Keep rows whose timestamp is within the last `days` days (0 = all)."""
     if days <= 0:
@@ -222,10 +263,10 @@ def _section_thought(rows, days):
 
 
 def _section_trades(rows, days):
-    print("\n[4] TRADES & MONEY  (data/trade_outcomes.csv)")
+    print("\n[4] STRATEGY TRADES & MONEY  (data/trade_outcomes.csv)")
     if not rows:
-        print("    No closed trades yet. (The robot opens a trade only when the")
-        print("    AI is >=70% sure — wait a few days and check again.)")
+        print("    No closed strategy trades yet. Explicit broker plumbing tests")
+        print("    are shown separately and are excluded from these statistics.")
         return None
     pnls = [_f(r.get("pnl")) for r in rows]
     wins = [p for p in pnls if p > 0]
@@ -259,8 +300,23 @@ def _section_trades(rows, days):
     return {"pf": pf, "n": len(rows), "wr": wr}
 
 
+def _section_plumbing_tests(rows):
+    """Display broker-plumbing audit outcomes outside strategy statistics."""
+    print("\n[5] BROKER PLUMBING TESTS  (excluded from strategy statistics)")
+    if not rows:
+        print("    No explicit plumbing-test outcomes identified.")
+        return
+    pnls = [_f(row.get("pnl")) for row in rows]
+    print(f"    Verified test outcomes: {len(rows)}")
+    print(f"    Audit PnL (net)       : {sum(pnls):+.2f}")
+    for row in rows:
+        print(f"        deal {row.get('order_id','?')}  "
+              f"position {row.get('position_id','?')}  "
+              f"entry {row.get('side','?')}  PnL {_f(row.get('pnl')):+.2f}")
+
+
 def _section_health(days):
-    print("\n[5] SYSTEM HEALTH")
+    print("\n[6] SYSTEM HEALTH")
     data_files = [f for f in DATA.glob("*") if f.is_file()]
     log_files = [f for f in LOGS.glob("trading_*.log") if f.is_file()]
     total = sum(f.stat().st_size for f in data_files + log_files)
@@ -320,7 +376,7 @@ def _section_health(days):
 
 
 def _section_history(days):
-    print("\n[6] HISTORY & BACKTEST")
+    print("\n[7] HISTORY & BACKTEST")
     hist = sorted(DATA.glob("history_*.npz"))
     if hist:
         for h in hist:
@@ -340,7 +396,7 @@ def _section_history(days):
 
 
 def _section_verdict(trades_info, n_decisions):
-    print("\n[7] VERDICT  (plain language)")
+    print("\n[8] VERDICT  (plain language)")
     if not trades_info or trades_info.get("n", 0) < 20:
         print("    Not enough closed trades yet to judge (need ~50).")
         print("    Keep it running on demo and check again in a few days.")
@@ -363,7 +419,7 @@ def _section_verdict(trades_info, n_decisions):
 # --------------------------------------------------------------------------- #
 # HTML report (pretty, opens in the browser)
 # --------------------------------------------------------------------------- #
-def _build_html(decisions, outcomes, days, span) -> str:
+def _build_html(decisions, outcomes, plumbing, days, span) -> str:
     """Build a self-contained HTML report (inline CSS, no internet needed)."""
     esc = html.escape
 
@@ -418,6 +474,13 @@ def _build_html(decisions, outcomes, days, span) -> str:
             f"<td>{len(outs)}</td><td class='{pnl_cls}'>{pnl_s}</td>"
             f"<td>{wr_s}</td></tr>"
         )
+
+    plumbing_rows_html = "".join(
+        f"<tr><td>{esc(row.get('order_id', '?'))}</td>"
+        f"<td>{esc(row.get('side', '?'))}</td>"
+        f"<td>{_f(row.get('pnl')):+.2f}</td></tr>"
+        for row in plumbing
+    ) or "<tr><td colspan='3' class='mut'>None identified</td></tr>"
 
     # -- health --------------------------------------------------------------
     log_files = [f for f in LOGS.glob("trading_*.log") if f.is_file()]
@@ -490,8 +553,9 @@ def _build_html(decisions, outcomes, days, span) -> str:
 <div class="cards">
   {card("Decisions", n_dec, "analysis cycles logged")}
   {card("AI asked", asked, f"when strength ≥ {gate:.0f}")}
-  {card("Closed trades", len(outcomes), "completed trades")}
-  {card("Win rate", (f"{wr:.1f}%" if wr is not None else "—"), "winning trades")}
+  {card("Strategy trades", len(outcomes), "completed strategy trades")}
+  {card("Plumbing tests", len(plumbing), "excluded from strategy stats")}
+  {card("Win rate", (f"{wr:.1f}%" if wr is not None else "—"), "strategy winning trades")}
   {card("Total PnL", f"{total_pnl:+.2f}", "points")}
   {card("Profit factor", (f"{pf:.2f}" if pf is not None else "—"), ">1.0 = winning")}
 </div>
@@ -501,6 +565,12 @@ def _build_html(decisions, outcomes, days, span) -> str:
 <tr><th>Date</th><th>Decisions</th><th>Avg signal</th><th>AI asked</th>
 <th>AI B/S/H</th><th>Trades</th><th>PnL</th><th>Win%</th></tr>
 {rows_html}
+</table>
+
+<h2>🧪 Broker plumbing tests</h2>
+<table>
+<tr><th>Deal</th><th>Closing side</th><th>Net PnL</th></tr>
+{plumbing_rows_html}
 </table>
 
 <h2>🧠 What the robot thought</h2>
@@ -534,8 +604,19 @@ def main() -> int:
     args = parser.parse_args()
 
     decisions = _recent(_read_csv(DATA / "decisions_log.csv"), args.days)
-    outcomes = _dedupe_outcomes(
+    all_outcomes = _dedupe_outcomes(
         _recent(_read_csv(DATA / "trade_outcomes.csv"), args.days))
+    plumbing_records = _plumbing_test_records()
+    strategy_outcomes, plumbing_outcomes = _split_outcomes(
+        all_outcomes, set(plumbing_records))
+    # Existing CSV rows may have been written before the entry-side fix. Use
+    # the position-history metadata to display the correct test side without
+    # rewriting the user's audit CSV.
+    for row in plumbing_outcomes:
+        metadata = plumbing_records.get(str(row.get("order_id", "")))
+        if metadata:
+            row["position_id"] = metadata.get("position_id", "")
+            row["side"] = metadata.get("side", row.get("side", ""))
 
     span = (f"last {args.days} days" if args.days > 0 else "all time")
     print(BAR)
@@ -544,9 +625,10 @@ def main() -> int:
     print(BAR)
 
     _section_activity(decisions, args.days)
-    _section_daily(decisions, outcomes)
+    _section_daily(decisions, strategy_outcomes)
     _section_thought(decisions, args.days)
-    trades_info = _section_trades(outcomes, args.days)
+    trades_info = _section_trades(strategy_outcomes, args.days)
+    _section_plumbing_tests(plumbing_outcomes)
     _section_health(args.days)
     _section_history(args.days)
     _section_verdict(trades_info, len(decisions))
@@ -560,7 +642,8 @@ def main() -> int:
     if args.html:
         try:
             out = DATA / "robot_report.html"
-            out.write_text(_build_html(decisions, outcomes, args.days, span),
+            out.write_text(_build_html(decisions, strategy_outcomes,
+                                        plumbing_outcomes, args.days, span),
                            encoding="utf-8")
             print(f"\n  HTML report saved -> {out}")
         except OSError as exc:

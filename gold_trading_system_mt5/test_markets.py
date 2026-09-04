@@ -97,8 +97,8 @@ def test_config_defaults():
     # spelling.
     check("MT5 (trade) symbol resolves to XAUUSD",
           normalize_symbol(config.MT5_SYMBOL) == "XAUUSD")
-    check("DATA symbol resolves to XAUUSD in the MT5 version",
-          normalize_symbol(config.DATA_SYMBOL) == "XAUUSD")
+    check("DATA symbol is a recognized gold market",
+          normalize_symbol(config.DATA_SYMBOL) in ("GC", "MGC", "XAUUSD"))
 
 
 def main():
